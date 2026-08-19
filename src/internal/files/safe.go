@@ -7,8 +7,13 @@ package files
 import (
 	"errors"
 	"path/filepath"
+	"regexp"
 	"strings"
 )
+
+// drivePrefixRe 匹配 Windows 盘符前缀(如 "C:", "c:\")。
+// 注意:filepath.IsAbs 对 "C:foo"(相对盘符路径)返回 false,需单独拦截。
+var drivePrefixRe = regexp.MustCompile(`^[A-Za-z]:[\\/]?`)
 
 // 路径相关错误。
 var (
@@ -23,8 +28,8 @@ func Normalize(root, rel string) (string, error) {
 	if rel == "" || rel == "/" || rel == "." {
 		return root, nil
 	}
-	// 统一拒绝绝对路径:Windows 盘符路径 + 前导斜杠(各平台一致)
-	if filepath.IsAbs(rel) || strings.HasPrefix(rel, "/") {
+	// 统一拒绝绝对路径:Windows 盘符路径(含 "C:foo" 相对盘符变体)+ 前导斜杠
+	if filepath.IsAbs(rel) || strings.HasPrefix(rel, "/") || drivePrefixRe.MatchString(rel) {
 		return "", ErrAbsPath
 	}
 	clean := filepath.Clean(filepath.FromSlash(rel))

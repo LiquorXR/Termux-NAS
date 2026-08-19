@@ -24,11 +24,17 @@ func TestNormalize(t *testing.T) {
 		// 拒绝绝对路径
 		{"/etc/passwd", "", true},
 		{`C:\Windows`, "", true},
+		{`C:`, "", true},
+		{`\\server\share`, "", true},
 		// 拒绝逃逸
 		{"..", "", true},
 		{"../etc", "", true},
 		{"a/../../etc", "", true},
 		{"../../", "", true},
+		{"a/../../../..", "", true},
+		// 前缀欺骗:root=/nas/files,兄弟目录 /nas/files2 必须被拒
+		{"../files2/evil", "", true},
+		{"../files2", "", true},
 	}
 	for _, tt := range tests {
 		got, err := Normalize(root, tt.rel)
@@ -51,7 +57,7 @@ func TestNormalize(t *testing.T) {
 
 func TestSafeName(t *testing.T) {
 	ok := []string{"a.txt", "我的文件", "a-b_c.d", "1", "..a"}
-	bad := []string{"", ".", "..", "a/b", `a\b`, "/etc", "a b/../c"}
+	bad := []string{"", ".", "..", "a/b", `a\b`, "/etc", "a b/../c", `..\..`}
 	for _, n := range ok {
 		if !SafeName(n) {
 			t.Errorf("SafeName(%q): 应为合法", n)
@@ -61,5 +67,27 @@ func TestSafeName(t *testing.T) {
 		if SafeName(n) {
 			t.Errorf("SafeName(%q): 应判非法", n)
 		}
+	}
+}
+
+// TestNormalizeRootPrefix 前缀欺骗回归:root 的子串前缀目录不得被当作 root。
+func TestNormalizeRootPrefix(t *testing.T) {
+	root := filepath.FromSlash("/nas/files")
+	for _, rel := range []string{"../files2", "../files2/x", "../../files"} {
+		if got, err := Normalize(root, rel); err == nil {
+			t.Errorf("Normalize(root=%q, %q): 期望越界错误,得到 %q", root, rel, got)
+		}
+	}
+}
+
+// TestRel 相对路径换算。
+func TestRel(t *testing.T) {
+	root := filepath.FromSlash("/nas/files")
+	full := filepath.Join(root, "a", "b.txt")
+	if got := Rel(root, full); got != "a/b.txt" {
+		t.Errorf("Rel = %q, 期望 %q", got, "a/b.txt")
+	}
+	if got := Rel(root, root); got != "" {
+		t.Errorf("Rel(root) = %q, 期望空串", got)
 	}
 }
