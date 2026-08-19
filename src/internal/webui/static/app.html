@@ -4,6 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Termux NAS</title>
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#0f1115">
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="/css/app.css">
 <script src="/vendor/htmx.min.js"></script>
 </head>
@@ -43,6 +46,13 @@ fetch('/api/auth/me').then(function (r) { return r.json(); }).then(function (u) 
 });
 // 默认加载文件面板
 htmx.ajax('GET', '/partials/files', { target: '#content' });
+
+// PWA:注册 service worker(HTTPS 或 localhost 下生效)
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', function () {
+    navigator.serviceWorker.register('/sw.js').catch(function () { /* 静默 */ });
+  });
+}
 </script>
 </body>
 </html>
