@@ -37,12 +37,15 @@ type Session struct {
 
 // Store 认证数据访问(users / sessions 表,迁移 v2)。
 type Store struct {
-	db  *sql.DB
-	log *slog.Logger
+	db       *sql.DB
+	log      *slog.Logger
+	limiter  *loginLimiter // 登录失败限流(M5 安全加固)
 }
 
 // NewStore 创建认证存储。
-func NewStore(db *sql.DB, log *slog.Logger) *Store { return &Store{db: db, log: log} }
+func NewStore(db *sql.DB, log *slog.Logger) *Store {
+	return &Store{db: db, log: log, limiter: newLoginLimiter()}
+}
 
 // HasUsers 是否存在用户(决定 /setup 是否可用)。
 func (s *Store) HasUsers() (bool, error) {

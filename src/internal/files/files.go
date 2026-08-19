@@ -153,6 +153,11 @@ func (s *Store) HandleUpload(c *fiber.Ctx) error {
 		if !SafeName(fh.Filename) {
 			continue
 		}
+		// M5 安全加固:单文件上限 256 MiB(手机内存有限,避免整体缓冲)
+		if fh.Size > maxUploadSize {
+			s.log.Warn("拒绝超大上传", "name", fh.Filename, "size", fh.Size)
+			continue
+		}
 		dst := filepath.Join(full, fh.Filename)
 		if err := c.SaveFile(fh, dst); err != nil {
 			s.log.Error("保存上传文件失败", "name", fh.Filename, "err", err)
@@ -162,6 +167,9 @@ func (s *Store) HandleUpload(c *fiber.Ctx) error {
 	}
 	return c.JSON(fiber.Map{"ok": true, "uploaded": uploaded})
 }
+
+// maxUploadSize 单文件上传上限(256 MiB;手机内存有限,避免超大文件整体缓冲)。
+const maxUploadSize = 256 << 20
 
 // HandleDownload GET /api/files/download?path= → 流式下载。
 func (s *Store) HandleDownload(c *fiber.Ctx) error {

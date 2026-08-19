@@ -2,6 +2,7 @@ package auth
 
 import (
 	"errors"
+	"strconv"
 	"strings"
 	"time"
 
@@ -61,8 +62,19 @@ func (s *Store) HandleSetup(c *fiber.Ctx) error {
 	return c.JSON(fiber.Map{"ok": true})
 }
 
-// HandleLogin 登录:校验凭据并下发会话 cookie。
+// HandleLogin 登录:校验凭据并下发会话 cookie。含失败速率限制。
 func (s *Store) HandleLogin(c *fiber.Ctx) error {
+	// 限流:锁定期间直接拒绝(附 Retry-After)
+	if !s.limiter.allow(c) {
+		ra := s.limiter.retryAfter(c)
+		if ra > 0 {
+			c.Set("Retry-After", strconv.Itoa(ra))
+		}
+		return c.Status(fiber.StatusTooManyRequests).JSON(fiber.Map{
+			"error":      "尝试过于频繁,请稍后再试",
+			"retry_after": ra,
+		})
+	}
 	var p LoginParams
 	if err := c.BodyParser(&p); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "请求格式无效"})
@@ -70,11 +82,13 @@ func (s *Store) HandleLogin(c *fiber.Ctx) error {
 	user, err := s.Authenticate(p.Username, p.Password)
 	if err != nil {
 		if errors.Is(err, ErrBadCreds) {
+			s.limiter.fail(c) // 记录失败
 			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "用户名或密码错误"})
 		}
 		s.log.Error("登录校验失败", "username", p.Username, "err", err)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "登录失败"})
 	}
+	s.limiter.success(c) // 登录成功清除计数
 	sess, err := s.CreateSession(user.ID)
 	if err != nil {
 		s.log.Error("创建会话失败", "user_id", user.ID, "err", err)

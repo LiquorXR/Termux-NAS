@@ -25,6 +25,9 @@ func (d *Daemon) buildHTTP() (*fiber.App, error) {
 		BodyLimit: 512 << 20,
 	})
 
+	// 安全响应头(M5 安全加固):全局中间件
+	app.Use(securityHeaders)
+
 	// 健康检查(供 nasm status 探活与 runit 监控)
 	app.Get("/health", func(c *fiber.Ctx) error {
 		return c.JSON(fiber.Map{
