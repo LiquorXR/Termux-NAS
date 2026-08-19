@@ -1,0 +1,64 @@
+<div class="card">
+  <div class="fbar">
+    <h2>插件市场</h2>
+    <span class="fcount" id="mk-name"></span>
+  </div>
+  <p style="margin-bottom:12px">浏览并一键安装社区插件。安装后请到「插件」页启动。</p>
+  <div class="mgrid" id="mk-grid" style="grid-template-columns:repeat(auto-fit,minmax(260px,1fr))">
+    <p class="fempty">加载中…</p>
+  </div>
+</div>
+
+<script>
+(function () {
+  function install(id, btn) {
+    var old = btn.innerHTML;
+    btn.disabled = true;
+    btn.textContent = '安装中…';
+    fetch('/api/market/install', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: id })
+    })
+      .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+      .then(function (res) {
+        if (!res.ok) alert(res.j.error || '安装失败');
+        load();
+      })
+      .catch(function () { alert('网络错误'); load(); })
+      .finally(function () { btn.disabled = false; btn.innerHTML = old; });
+  }
+
+  function render(m) {
+    var grid = document.getElementById('mk-grid');
+    document.getElementById('mk-name').textContent = m.name || '';
+    if (!m.plugins || !m.plugins.length) {
+      grid.innerHTML = '<p class="fempty">市场暂无插件</p>';
+      return;
+    }
+    grid.innerHTML = m.plugins.map(function (p) {
+      var btn = p.installed
+        ? '<button class="btn-mini" disabled style="opacity:.5">已安装</button>'
+        : '<button class="btn-mini" onclick="mkInstall(\'' + p.id + '\',this)">安装</button>';
+      return '<div class="mcell" style="display:flex;flex-direction:column;gap:8px">' +
+        '<div style="font-size:15px;font-weight:500">' + p.name +
+        ' <span style="font-size:11px;color:var(--muted)">v' + p.version + '</span></div>' +
+        '<div style="font-size:12px;color:var(--muted);flex:1">' + p.description + '</div>' +
+        '<div style="font-size:11px;color:var(--muted)">作者:' + (p.author || '-') +
+        (p.size_hint ? ' · ' + p.size_hint : '') + '</div>' +
+        '<div style="text-align:right">' + btn + '</div>' +
+        '</div>';
+    }).join('');
+  }
+
+  function load() {
+    fetch('/api/market')
+      .then(function (r) { return r.json(); })
+      .then(function (j) { render(j.market || {}); })
+      .catch(function () {});
+  }
+
+  window.mkInstall = install;
+  load();
+})();
+</script>

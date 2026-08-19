@@ -1,0 +1,47 @@
+{
+  "name": "Termux NAS 官方市场",
+  "version": 1,
+  "updated_at": "2026-08-19T00:00:00+08:00",
+  "plugins": [
+    {
+      "id": "download",
+      "name": "下载中心",
+      "version": "0.1.0",
+      "description": "aria2 集成下载中心:添加任务/暂停/速度/进度查看",
+      "author": "Termux NAS",
+      "icon": "download",
+      "download_url": "https://example.com/plugins/download.tar.gz",
+      "size_hint": "约 8 MiB"
+    },
+    {
+      "id": "alist",
+      "name": "云盘聚合",
+      "version": "0.1.0",
+      "description": "聚合挂载阿里云盘/百度网盘等,统一浏览与下载",
+      "author": "Termux NAS",
+      "icon": "cloud",
+      "download_url": "https://example.com/plugins/alist.tar.gz",
+      "size_hint": "约 20 MiB"
+    },
+    {
+      "id": "media",
+      "name": "媒体服务",
+      "version": "0.1.0",
+      "description": "音乐/视频流媒体播放,DLNA 投屏",
+      "author": "Termux NAS",
+      "icon": "play",
+      "download_url": "https://example.com/plugins/media.tar.gz",
+      "size_hint": "约 12 MiB"
+    },
+    {
+      "id": "photos",
+      "name": "照片浏览",
+      "version": "0.1.0",
+      "description": "照片墙浏览与轻量管理(缩略图/EXIF)",
+      "author": "Termux NAS",
+      "icon": "image",
+      "download_url": "https://example.com/plugins/photos.tar.gz",
+      "size_hint": "约 5 MiB"
+    }
+  ]
+}

@@ -106,6 +106,9 @@ func (d *Daemon) buildHTTP() (*fiber.App, error) {
 	app.Get("/partials/plugins", d.auth.RequireAuth, func(c *fiber.Ctx) error {
 		return servePage(c, "partials/plugins.html")
 	})
+	app.Get("/partials/market", d.auth.RequireAuth, func(c *fiber.Ctx) error {
+		return servePage(c, "partials/market.html")
+	})
 	app.Get("/partials/services", d.auth.RequireAuth, func(c *fiber.Ctx) error {
 		return servePage(c, "partials/services.html")
 	})
@@ -136,6 +139,10 @@ func (d *Daemon) buildHTTP() (*fiber.App, error) {
 	app.Delete("/api/backup/jobs/:id", checkSameOrigin, d.auth.RequireAuth, d.backupDelete)
 	app.Post("/api/backup/run", checkSameOrigin, d.auth.RequireAuth, d.backupRun)
 	app.Post("/api/backup/restore", checkSameOrigin, d.auth.RequireAuth, d.backupRestore)
+
+	// --- M6 插件市场 ---
+	app.Get("/api/market", d.auth.RequireAuth, d.marketIndex)
+	app.Post("/api/market/install", checkSameOrigin, d.auth.RequireAuth, d.marketInstall)
 
 	// --- M4 插件管理 API(用户通道,需登录;nasd 全权控制) ---
 	app.Get("/api/plugins", d.auth.RequireAuth, d.pluginsList)

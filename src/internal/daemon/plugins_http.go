@@ -144,26 +144,31 @@ func (d *Daemon) pluginInstall(c *fiber.Ctx) error {
 	if source == "" {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "缺少 source URL"})
 	}
+	if err := d.installPluginFromURL(name, source); err != nil {
+		return pluginInstallErr(c, err)
+	}
+	return c.JSON(fiber.Map{"ok": true, "id": name})
+}
+
+// installPluginFromURL 从 URL 下载插件包并安装(供市场/插件 API 复用)。
+func (d *Daemon) installPluginFromURL(name, source string) error {
 	resp, err := http.Get(source)
 	if err != nil {
-		return c.Status(fiber.StatusBadGateway).JSON(fiber.Map{"error": "下载失败: " + err.Error()})
+		return fmt.Errorf("下载失败: %w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return c.Status(fiber.StatusBadGateway).JSON(fiber.Map{"error": "下载失败: HTTP " + resp.Status})
+		return fmt.Errorf("下载失败: HTTP %s", resp.Status)
 	}
 	downloaded, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return c.Status(fiber.StatusBadGateway).JSON(fiber.Map{"error": "读取下载内容失败: " + err.Error()})
+		return fmt.Errorf("读取下载内容失败: %w", err)
 	}
 	if len(downloaded) == 0 {
-		return c.Status(fiber.StatusBadGateway).JSON(fiber.Map{"error": "下载内容为空"})
+		return fmt.Errorf("下载内容为空")
 	}
-	binName, err := d.installPlugin(name, bytes.NewReader(downloaded))
-	if err != nil {
-		return pluginInstallErr(c, err)
-	}
-	return c.JSON(fiber.Map{"ok": true, "id": binName})
+	_, err = d.installPluginFromReader(name, bytes.NewReader(downloaded))
+	return err
 }
 
 // installPlugin 解析 .tar.gz 插件包并安装,返回实际落地文件名
