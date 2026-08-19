@@ -106,6 +106,9 @@ func (d *Daemon) buildHTTP() (*fiber.App, error) {
 	app.Get("/partials/services", d.auth.RequireAuth, func(c *fiber.Ctx) error {
 		return servePage(c, "partials/services.html")
 	})
+	app.Get("/partials/backup", d.auth.RequireAuth, func(c *fiber.Ctx) error {
+		return servePage(c, "partials/backup.html")
+	})
 	app.Get("/partials/settings", d.auth.RequireAuth, func(c *fiber.Ctx) error {
 		return servePage(c, "partials/settings.html")
 	})
@@ -122,6 +125,14 @@ func (d *Daemon) buildHTTP() (*fiber.App, error) {
 	app.Post("/api/svc/stop", checkSameOrigin, d.auth.RequireAuth, d.svcStop)
 	app.Post("/api/svc/restart", checkSameOrigin, d.auth.RequireAuth, d.svcRestart)
 	app.Post("/api/svc/autostart", checkSameOrigin, d.auth.RequireAuth, d.svcAutostart)
+
+	// --- M5 备份中心 ---
+	app.Get("/api/backup/jobs", d.auth.RequireAuth, d.backupJobs)
+	app.Post("/api/backup/jobs", checkSameOrigin, d.auth.RequireAuth, d.backupCreate)
+	app.Put("/api/backup/jobs/:id", checkSameOrigin, d.auth.RequireAuth, d.backupUpdate)
+	app.Delete("/api/backup/jobs/:id", checkSameOrigin, d.auth.RequireAuth, d.backupDelete)
+	app.Post("/api/backup/run", checkSameOrigin, d.auth.RequireAuth, d.backupRun)
+	app.Post("/api/backup/restore", checkSameOrigin, d.auth.RequireAuth, d.backupRestore)
 
 	// --- M4 插件管理 API(用户通道,需登录;nasd 全权控制) ---
 	app.Get("/api/plugins", d.auth.RequireAuth, d.pluginsList)

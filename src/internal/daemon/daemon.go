@@ -21,6 +21,7 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/termux-nas/nas/internal/auth"
+	"github.com/termux-nas/nas/internal/backup"
 	"github.com/termux-nas/nas/internal/config"
 	"github.com/termux-nas/nas/internal/files"
 	"github.com/termux-nas/nas/internal/mgmt"
@@ -39,8 +40,9 @@ type Daemon struct {
 	auth  *auth.Store
 	files *files.Store
 	app   *fiber.App
-	pm    *Manager // 插件管理器(M4)
-	svc   *svc.Controller // 服务控制(M5)
+	pm    *Manager          // 插件管理器(M4)
+	svc   *svc.Controller   // 服务控制(M5)
+	backups *backup.Manager // 备份中心(M5)
 
 	mgmtLn  net.Listener
 	mgmtSrv *mgmt.Server
@@ -101,6 +103,13 @@ func (d *Daemon) Run(ctx context.Context) error {
 	// 2.5) 服务控制(M5):基于 termux-services,Windows 开发环境自动模拟
 	d.svc = svc.New(nil, nil, d.log)
 
+	// 2.6) 备份中心(M5):任务存储 + 调度 + 执行 + 通知
+	backupStore, err := backup.NewStore(d.db, d.log)
+	if err != nil {
+		return fmt.Errorf("初始化备份存储: %w", err)
+	}
+	d.backups = backup.NewManager(backupStore, d.log, nil)
+
 	// 3) 用户通道 HTTP :7531
 	app, err := d.buildHTTP()
 	if err != nil {
@@ -124,6 +133,11 @@ func (d *Daemon) Run(ctx context.Context) error {
 	reapCtx, reapCancel := context.WithCancel(ctx)
 	defer reapCancel()
 	go d.reapLoop(reapCtx)
+
+	// 6) 备份调度 ticker(每分钟检查 cron 到期任务)
+	backupCtx, backupCancel := context.WithCancel(ctx)
+	defer backupCancel()
+	go d.backupLoop(backupCtx)
 
 	d.log.Info("nasd 已就绪", "version", version.String(), "pid", os.Getpid(),
 		"root", d.paths.Root)
@@ -187,6 +201,22 @@ func (d *Daemon) reapLoop(ctx context.Context) {
 			if reaped := d.pm.Reap(idle); len(reaped) > 0 {
 				d.log.Info("空闲插件已回收", "ids", reaped)
 			}
+		}
+	}
+}
+
+// backupLoop 每分钟扫描一次 cron 到期任务并触发备份。
+func (d *Daemon) backupLoop(ctx context.Context) {
+	ticker := time.NewTicker(1 * time.Minute)
+	defer ticker.Stop()
+	// 启动后先对齐一次(立即检查,便于测试)
+	d.backups.Schedule(time.Now())
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case now := <-ticker.C:
+			d.backups.Schedule(now)
 		}
 	}
 }

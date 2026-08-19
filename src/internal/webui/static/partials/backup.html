@@ -1,0 +1,148 @@
+<div class="card" style="margin-bottom:16px">
+  <h2>新建备份任务</h2>
+  <p style="margin-bottom:12px">将源目录备份到目标目录(目标可填远程 rsync 地址,如 <code>user@host:/path</code>)。定时表达式为 5 字段 cron(分 时 日 月 周),留空表示仅手动执行。</p>
+  <div style="display:grid;grid-template-columns:1fr 1fr 1fr 160px;gap:8px;align-items:end">
+    <div><label>任务名</label><input id="bk-name" placeholder="如:照片备份"></div>
+    <div><label>源目录</label><input id="bk-src" placeholder="/storage/shared/DCIM"></div>
+    <div><label>目标目录</label><input id="bk-dst" placeholder="/storage/shared/backup"></div>
+    <div><label>定时(cron)</label><input id="bk-sched" placeholder="0 3 * * *"></div>
+  </div>
+  <div style="margin-top:12px">
+    <button type="button" class="btn-mini" onclick="bkCreate()">创建任务</button>
+    <span id="bk-msg" class="err" style="display:inline;margin-left:12px"></span>
+  </div>
+</div>
+
+<div class="card">
+  <div class="fbar">
+    <h2>备份任务</h2>
+    <span class="fcount" id="bk-count"></span>
+  </div>
+  <table class="ftable">
+    <thead>
+      <tr><th>任务</th><th>状态</th><th>上次运行</th><th>上次大小</th><th style="text-align:right">操作</th></tr>
+    </thead>
+    <tbody id="bk-rows">
+      <tr><td colspan="5" class="fempty">加载中…</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<script>
+(function () {
+  var stateText = { ok: '成功', error: '失败', running: '执行中', '': '未运行' };
+  var stateColor = { ok: 'var(--accent)', error: 'var(--danger)', running: 'var(--amber, #e8a33d)', '': 'var(--muted)' };
+
+  function bkAct(id, action, btn) {
+    var old = btn.innerHTML;
+    btn.disabled = true;
+    btn.textContent = '…';
+    fetch('/api/backup/' + action, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: id })
+    })
+      .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+      .then(function (res) {
+        if (!res.ok) alert(res.j.error || '操作失败');
+        load();
+      })
+      .catch(function () { alert('网络错误'); load(); })
+      .finally(function () { btn.disabled = false; btn.innerHTML = old; });
+  }
+
+  function bkDelete(id) {
+    if (!confirm('确定删除备份任务?')) return;
+    fetch('/api/backup/jobs/' + id, { method: 'DELETE' })
+      .then(function (r) { return r.json(); })
+      .then(function () { load(); })
+      .catch(function () { alert('网络错误'); });
+  }
+
+  function fmtSize(n) {
+    if (!n) return '—';
+    if (n < 1024) return n + ' B';
+    var u = ['KB', 'MB', 'GB'];
+    var i = -1;
+    do { n /= 1024; i++; } while (n >= 1024 && i < u.length - 1);
+    return n.toFixed(1) + ' ' + u[i];
+  }
+
+  function fmtTime(s) {
+    if (!s || s.indexOf('0001') === 0) return '—';
+    var d = new Date(s);
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' +
+      String(d.getDate()).padStart(2, '0') + ' ' + String(d.getHours()).padStart(2, '0') + ':' +
+      String(d.getMinutes()).padStart(2, '0');
+  }
+
+  function render(list) {
+    var tbody = document.getElementById('bk-rows');
+    document.getElementById('bk-count').textContent = '共 ' + list.length + ' 个';
+    if (!list.length) {
+      tbody.innerHTML = '<tr><td colspan="5" class="fempty">暂无备份任务,请在上方创建</td></tr>';
+      return;
+    }
+    tbody.innerHTML = list.map(function (j) {
+      var running = j.last_status === 'running';
+      var btns = '';
+      btns += '<button class="btn-mini" onclick="bkAct(' + j.id + ',\'run\',this)" ' + (running ? 'disabled' : '') + '>立即备份</button>';
+      btns += '<button class="btn-mini" onclick="bkAct(' + j.id + ',\'restore\',this)" ' + (running ? 'disabled' : '') + '>恢复</button>';
+      btns += '<button class="btn-mini danger" onclick="bkDelete(' + j.id + ')">删除</button>';
+      var info = '<div style="font-size:11px;color:var(--muted)">' +
+        '<span title="源">' + j.source + '</span> → <span title="目标">' + j.target + '</span>' +
+        (j.schedule ? ' · <span title="定时">' + j.schedule + '</span>' : ' · 手动') +
+        (j.enabled ? '' : ' · 已停用') + '</div>';
+      return '<tr>' +
+        '<td>' + j.name + info + '</td>' +
+        '<td><span style="color:' + (stateColor[j.last_status] || 'var(--muted)') + '">' + (stateText[j.last_status] || j.last_status) + '</span></td>' +
+        '<td>' + fmtTime(j.last_run) + '</td>' +
+        '<td>' + fmtSize(j.last_size) + '</td>' +
+        '<td style="text-align:right;white-space:nowrap">' + btns + '</td>' +
+        '</tr>';
+    }).join('');
+  }
+
+  function load() {
+    fetch('/api/backup/jobs')
+      .then(function (r) { return r.json(); })
+      .then(function (j) { render(j.jobs || []); })
+      .catch(function () {});
+  }
+
+  function bkCreate() {
+    var name = document.getElementById('bk-name').value.trim();
+    var src = document.getElementById('bk-src').value.trim();
+    var dst = document.getElementById('bk-dst').value.trim();
+    var sched = document.getElementById('bk-sched').value.trim();
+    var msg = document.getElementById('bk-msg');
+    if (!name || !src || !dst) { msg.textContent = '任务名/源/目标必填'; return; }
+    msg.textContent = '创建中…';
+    fetch('/api/backup/jobs', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: name, source: src, target: dst, schedule: sched })
+    })
+      .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+      .then(function (res) {
+        if (res.ok) {
+          msg.textContent = '创建成功';
+          document.getElementById('bk-name').value = '';
+          document.getElementById('bk-src').value = '';
+          document.getElementById('bk-dst').value = '';
+          document.getElementById('bk-sched').value = '';
+          load();
+        } else {
+          msg.textContent = res.j.error || '创建失败';
+        }
+      })
+      .catch(function () { msg.textContent = '网络错误'; });
+  }
+
+  window.bkAct = bkAct;
+  window.bkDelete = bkDelete;
+  window.bkCreate = bkCreate;
+  load();
+  setInterval(load, 5000);
+})();
+</script>
