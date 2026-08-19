@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>首次设置 · Termux NAS</title>
+<link rel="stylesheet" href="/css/app.css">
+<script src="/vendor/htmx.min.js"></script>
+</head>
+<body>
+<div class="auth-wrap">
+  <h1>Termux NAS</h1>
+  <p class="sub">首次使用,请创建管理员账号</p>
+  <form hx-post="/api/auth/setup" hx-swap="none"
+        hx-on::before-request="if (document.getElementById('pw').value !== document.getElementById('pw2').value) { event.preventDefault(); document.getElementById('err').textContent = '两次输入的密码不一致'; }"
+        hx-on::after-request="handleAuth(event, '/')">
+    <label for="username">用户名</label>
+    <input id="username" name="username" autocomplete="username" required autofocus>
+    <label for="pw">密码(至少 8 位)</label>
+    <input id="pw" name="password" type="password" autocomplete="new-password" minlength="8" required>
+    <label for="pw2">确认密码</label>
+    <input id="pw2" type="password" autocomplete="new-password" minlength="8" required>
+    <button type="submit">创建并进入</button>
+    <div class="err" id="err"></div>
+  </form>
+</div>
+<script>
+function handleAuth(evt, okUrl) {
+  var xhr = evt.detail.xhr;
+  if (xhr.status >= 200 && xhr.status < 300) { location.href = okUrl; return; }
+  var msg = "请求失败(" + xhr.status + ")";
+  try { msg = JSON.parse(xhr.responseText).error || msg; } catch (e) {}
+  document.getElementById("err").textContent = msg;
+}
+</script>
+</body>
+</html>

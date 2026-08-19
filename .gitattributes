@@ -1,0 +1,6 @@
+# 统一 LF 换行(Windows 开发,Termux/Unix 部署)
+* text=auto eol=lf
+
+# 二进制(构建产物不应入库,此处为保险)
+*.exe binary
+*.db binary
