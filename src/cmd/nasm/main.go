@@ -244,18 +244,6 @@ func cmdLog(args []string) error {
 	return nil
 }
 
-// cmdUpdate 更新主框架 nasd(M1 占位,M6 实现下载+校验+原子替换)。
-func cmdUpdate(args []string) error {
-	_ = flag.NewFlagSet("update", flag.ExitOnError)
-	return fmt.Errorf("nasm update 尚未实现(规划于 M6:下载校验 → daemon.enterUpdate → 原子替换)")
-}
-
-// cmdSelfUpdate 更新 nasm 自身(M1 占位)。
-func cmdSelfUpdate(args []string) error {
-	_ = flag.NewFlagSet("self-update", flag.ExitOnError)
-	return fmt.Errorf("nasm self-update 尚未实现(规划于 M6)")
-}
-
 // --- 辅助 ---
 
 // waitReady 轮询管理通道,等待 nasd 完成启动。
@@ -310,8 +298,8 @@ func usage() {
   nasm restart              重启 nasd
   nasm status [-json]       查看运行状态(版本/uptime/健康)
   nasm log [-n 行数]         查看主框架日志尾部
-  nasm update [version]     更新主框架 nasd(规划 M6)
-  nasm self-update          更新 nasm 自身(规划 M6)
+  nasm update [url|file] [-sha256 校验和]   更新主框架 nasd(下载→校验→原子替换→重启)
+  nasm self-update [url|file] 更新 nasm 自身
   nasm version              版本信息
   nasm help                 帮助
 

@@ -17,12 +17,19 @@ import (
 
 	"github.com/termux-nas/nas/internal/config"
 	"github.com/termux-nas/nas/internal/daemon"
+	"github.com/termux-nas/nas/internal/version"
 )
 
 func main() {
 	flagRoot := flag.String("root", "", "部署根目录(默认 $NAS_ROOT 或 $HOME/nas)")
 	flagDebug := flag.Bool("debug", false, "开启调试日志")
+	flagVersion := flag.Bool("version", false, "输出版本信息后退出")
 	flag.Parse()
+
+	if *flagVersion {
+		fmt.Println(version.String())
+		return
+	}
 
 	root := *flagRoot
 	if root == "" {

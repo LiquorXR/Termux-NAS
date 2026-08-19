@@ -221,6 +221,12 @@ func (d *Daemon) backupLoop(ctx context.Context) {
 	}
 }
 
+// setUpdateFlag 写入更新标记(run/update.flag),供 nasm 确认进入更新模式。
+func (d *Daemon) setUpdateFlag() error {
+	return os.WriteFile(filepath.Join(d.paths.RunDir, "update.flag"),
+		[]byte("nasd update in progress"), 0o644)
+}
+
 // Handle 分发管理通道请求。
 func (d *Daemon) Handle(method string, params json.RawMessage) (json.RawMessage, *mgmt.RPCError) {
 	switch method {
@@ -238,7 +244,15 @@ func (d *Daemon) Handle(method string, params json.RawMessage) (json.RawMessage,
 		go d.requestStop()
 		return marshal(map[string]bool{"stopping": true})
 	case mgmt.MethodEnterUpdate:
-		// M1 占位:M6 实现更新模式(暂停服务、等待原子替换)。
+		// 进入更新模式:优雅停止(先停插件,再关 HTTP 退出),由 nasm 完成二进制替换。
+		// 与 daemon.stop 的区别:记录更新标记,重启由 nasm 负责。
+		d.log.Info("进入更新模式,准备停止")
+		go func() {
+			if err := d.setUpdateFlag(); err != nil {
+				d.log.Warn("写入更新标记失败", "err", err)
+			}
+			d.requestStop()
+		}()
 		return marshal(map[string]bool{"accepted": true})
 	case mgmt.MethodLogTail:
 		var p mgmt.LogTailParams
