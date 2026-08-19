@@ -94,16 +94,34 @@ type ManagedPlugin struct {
 }
 
 // isExecutable 跨平台判断可执行文件。
-// Unix:检查执行位;Windows:os.Stat 不提供执行位,按可执行扩展名判定。
+// Unix:检查执行位;Windows:os.Stat 不提供执行位,采用扩展名 + 文件头探测
+// (PE "MZ" / ELF "\x7fELF" / shebang "#!"),兼容交叉编译产物与无扩展名插件。
 func isExecutable(path string, mode os.FileMode) bool {
-	if runtime.GOOS == "windows" {
-		switch strings.ToLower(filepath.Ext(path)) {
-		case ".exe", ".bat", ".cmd", ".com":
-			return true
-		}
+	if runtime.GOOS != "windows" {
+		return mode&0o111 != 0
+	}
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".exe", ".bat", ".cmd", ".com":
+		return true
+	}
+	// 无扩展名或非常规扩展名:探测文件头
+	f, err := os.Open(path)
+	if err != nil {
 		return false
 	}
-	return mode&0o111 != 0
+	defer f.Close()
+	head := make([]byte, 4)
+	n, _ := io.ReadFull(f, head)
+	head = head[:n]
+	switch {
+	case len(head) >= 2 && head[0] == 'M' && head[1] == 'Z': // PE
+		return true
+	case len(head) >= 4 && head[0] == 0x7f && string(head[1:4]) == "ELF":
+		return true
+	case len(head) >= 2 && head[0] == '#' && head[1] == '!': // shebang
+		return true
+	}
+	return false
 }
 
 // Manager 插件管理器(nasd 全权控制插件)。
@@ -143,7 +161,8 @@ func (m *Manager) Scan() ([]PluginInfo, error) {
 		if err != nil {
 			continue
 		}
-		if isExecutable(e.Name(), info.Mode()) {
+		full := filepath.Join(m.dir, e.Name())
+		if isExecutable(full, info.Mode()) {
 			id := e.Name()
 			seen[id] = true
 			m.mu.Lock()

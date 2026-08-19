@@ -113,6 +113,15 @@ func (d *Daemon) buildHTTP() (*fiber.App, error) {
 	// /api/plugins/* 插件管理器
 	// /p/<id>/*   插件反代(M4)
 
+	// --- M4 插件管理 API(用户通道,需登录;nasd 全权控制) ---
+	app.Get("/api/plugins", d.auth.RequireAuth, d.pluginsList)
+	app.Post("/api/plugins/install", checkSameOrigin, d.auth.RequireAuth, d.pluginInstall)
+	app.Post("/api/plugins/:id/start", checkSameOrigin, d.auth.RequireAuth, d.pluginStart)
+	app.Post("/api/plugins/:id/stop", checkSameOrigin, d.auth.RequireAuth, d.pluginStop)
+	app.Post("/api/plugins/:id/restart", checkSameOrigin, d.auth.RequireAuth, d.pluginRestart)
+	app.Delete("/api/plugins/:id", checkSameOrigin, d.auth.RequireAuth, d.pluginUninstall)
+	app.Get("/api/plugins/:id/log", d.auth.RequireAuth, d.pluginLog)
+
 	// --- M4 插件反代(懒加载入口,统一鉴权) ---
 	app.All("/p/:id/*", d.auth.RequireAuth, d.pluginProxy)
 	app.All("/p/:id", d.auth.RequireAuth, d.pluginProxy)
