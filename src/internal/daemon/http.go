@@ -103,6 +103,9 @@ func (d *Daemon) buildHTTP() (*fiber.App, error) {
 	app.Get("/partials/plugins", d.auth.RequireAuth, func(c *fiber.Ctx) error {
 		return servePage(c, "partials/plugins.html")
 	})
+	app.Get("/partials/services", d.auth.RequireAuth, func(c *fiber.Ctx) error {
+		return servePage(c, "partials/services.html")
+	})
 	app.Get("/partials/settings", d.auth.RequireAuth, func(c *fiber.Ctx) error {
 		return servePage(c, "partials/settings.html")
 	})
@@ -112,6 +115,13 @@ func (d *Daemon) buildHTTP() (*fiber.App, error) {
 	// /api/backup/* 备份中心
 	// /api/plugins/* 插件管理器
 	// /p/<id>/*   插件反代(M4)
+
+	// --- M5 服务控制 ---
+	app.Get("/api/svc/list", d.auth.RequireAuth, d.svcList)
+	app.Post("/api/svc/start", checkSameOrigin, d.auth.RequireAuth, d.svcStart)
+	app.Post("/api/svc/stop", checkSameOrigin, d.auth.RequireAuth, d.svcStop)
+	app.Post("/api/svc/restart", checkSameOrigin, d.auth.RequireAuth, d.svcRestart)
+	app.Post("/api/svc/autostart", checkSameOrigin, d.auth.RequireAuth, d.svcAutostart)
 
 	// --- M4 插件管理 API(用户通道,需登录;nasd 全权控制) ---
 	app.Get("/api/plugins", d.auth.RequireAuth, d.pluginsList)

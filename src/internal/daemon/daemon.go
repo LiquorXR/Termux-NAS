@@ -24,6 +24,7 @@ import (
 	"github.com/termux-nas/nas/internal/config"
 	"github.com/termux-nas/nas/internal/files"
 	"github.com/termux-nas/nas/internal/mgmt"
+	"github.com/termux-nas/nas/internal/svc"
 	"github.com/termux-nas/nas/internal/version"
 )
 
@@ -39,6 +40,7 @@ type Daemon struct {
 	files *files.Store
 	app   *fiber.App
 	pm    *Manager // 插件管理器(M4)
+	svc   *svc.Controller // 服务控制(M5)
 
 	mgmtLn  net.Listener
 	mgmtSrv *mgmt.Server
@@ -95,6 +97,9 @@ func (d *Daemon) Run(ctx context.Context) error {
 	} else {
 		d.log.Info("插件扫描完成", "count", len(d.pm.List()))
 	}
+
+	// 2.5) 服务控制(M5):基于 termux-services,Windows 开发环境自动模拟
+	d.svc = svc.New(nil, nil, d.log)
 
 	// 3) 用户通道 HTTP :7531
 	app, err := d.buildHTTP()

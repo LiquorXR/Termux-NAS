@@ -1,0 +1,106 @@
+<div class="card">
+  <div class="fbar">
+    <h2>服务控制</h2>
+    <span class="fcount" id="svc-count"></span>
+  </div>
+  <p style="margin-bottom:12px">基于 termux-services(runit)的系统服务管理:启停、重启、开机自启。插件相关的服务请到「插件」页管理。</p>
+  <table class="ftable">
+    <thead>
+      <tr><th>服务</th><th>状态</th><th>PID</th><th>运行时长</th><th>自启</th><th style="text-align:right">操作</th></tr>
+    </thead>
+    <tbody id="svc-rows">
+      <tr><td colspan="6" class="fempty">加载中…</td></tr>
+    </tbody>
+  </table>
+  <p class="msub" id="svc-err" style="color:var(--danger);margin-top:8px"></p>
+</div>
+
+<script>
+(function () {
+  var stateText = { running: '运行中', down: '已停止', unknown: '未知', error: '异常' };
+  var stateColor = { running: 'var(--accent)', down: 'var(--muted)', unknown: 'var(--muted)', error: 'var(--danger)' };
+
+  function svcAct(name, action, btn) {
+    var old = btn.innerHTML;
+    btn.disabled = true;
+    btn.textContent = '…';
+    fetch('/api/svc/' + action, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: name })
+    })
+      .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+      .then(function (res) {
+        if (!res.ok) document.getElementById('svc-err').textContent = res.j.error || '操作失败';
+        load();
+      })
+      .catch(function () { document.getElementById('svc-err').textContent = '网络错误'; load(); })
+      .finally(function () { btn.disabled = false; btn.innerHTML = old; });
+  }
+
+  function toggleAutostart(name, enabled, btn) {
+    btn.disabled = true;
+    fetch('/api/svc/autostart', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: name, enabled: enabled })
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (j) {
+        if (!j.ok) document.getElementById('svc-err').textContent = j.error || '设置失败';
+        load();
+      })
+      .catch(function () { document.getElementById('svc-err').textContent = '网络错误'; load(); })
+      .finally(function () { btn.disabled = false; });
+  }
+
+  function render(list) {
+    var tbody = document.getElementById('svc-rows');
+    document.getElementById('svc-count').textContent = '共 ' + list.length + ' 个';
+    if (!list.length) {
+      tbody.innerHTML = '<tr><td colspan="6" class="fempty">无可用服务</td></tr>';
+      return;
+    }
+    tbody.innerHTML = list.map(function (s) {
+      var running = s.state === 'running';
+      var down = s.state === 'down';
+      var btns = '';
+      if (running) {
+        btns += '<button class="btn-mini" onclick="svcAct(\'' + s.name + '\',\'stop\',this)">停止</button>';
+        btns += '<button class="btn-mini" onclick="svcAct(\'' + s.name + '\',\'restart\',this)">重启</button>';
+      } else {
+        btns += '<button class="btn-mini" onclick="svcAct(\'' + s.name + '\',\'start\',this)">启动</button>';
+      }
+      var autostart = '';
+      if (s.autostart) {
+        autostart = '<span style="color:var(--accent)">开</span> ' +
+          '<button class="btn-mini" onclick="toggleAutostart(\'' + s.name + '\',false,this)">关</button>';
+      } else {
+        autostart = '<span style="color:var(--muted)">关</span> ' +
+          '<button class="btn-mini" onclick="toggleAutostart(\'' + s.name + '\',true,this)">开</button>';
+      }
+      var desc = '<div style="font-size:11px;color:var(--muted)">' + (s.display_name || '') + ' · ' + (s.description || '') + '</div>';
+      return '<tr>' +
+        '<td>' + s.name + desc + '</td>' +
+        '<td><span style="color:' + (stateColor[s.state] || 'var(--muted)') + '">' + (stateText[s.state] || s.state) + '</span></td>' +
+        '<td>' + (s.pid || '—') + '</td>' +
+        '<td>' + (s.uptime || '—') + '</td>' +
+        '<td>' + autostart + '</td>' +
+        '<td style="text-align:right;white-space:nowrap">' + btns + '</td>' +
+        '</tr>';
+    }).join('');
+  }
+
+  function load() {
+    fetch('/api/svc/list')
+      .then(function (r) { return r.json(); })
+      .then(function (j) { render(j.services || []); })
+      .catch(function () { /* 静默重试 */ });
+  }
+
+  window.svcAct = svcAct;
+  window.toggleAutostart = toggleAutostart;
+  load();
+  setInterval(load, 5000);
+})();
+</script>
