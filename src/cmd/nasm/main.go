@@ -105,9 +105,9 @@ func cmdStart(args []string) error {
 	// 连接失败:清理上次残留的管理通道文件(死进程遗留的 addr/socket)
 	_ = mgmt.Cleanup(paths.SockPath)
 
-	nasdBin := findBinary(paths.BinDir, "nasd")
-	if _, err := os.Stat(nasdBin); err != nil {
-		return fmt.Errorf("未找到 nasd 二进制: %s(请先构建: make build)", nasdBin)
+	nasdBin, err := findBinary(paths.BinDir, "nasd")
+	if err != nil {
+		return fmt.Errorf("未找到 nasd 二进制: %s(请先构建: make build)", paths.BinDir)
 	}
 
 	if err := config.EnsureDirs(paths); err != nil {
@@ -269,8 +269,8 @@ func mustToken(paths config.Paths) string {
 	return cfg.ManageToken
 }
 
-// findBinary 定位二进制,兼容 Windows(.exe 后缀)。
-func findBinary(dir, name string) string {
+// findBinary 定位二进制,兼容 Windows(.exe 后缀)。找不到时返回 error。
+func findBinary(dir, name string) (string, error) {
 	candidates := []string{name, name + ".exe"}
 	if runtime.GOOS == "windows" {
 		candidates = []string{name + ".exe", name}
@@ -278,10 +278,10 @@ func findBinary(dir, name string) string {
 	for _, n := range candidates {
 		p := filepath.Join(dir, n)
 		if _, err := os.Stat(p); err == nil {
-			return p
+			return p, nil
 		}
 	}
-	return filepath.Join(dir, name)
+	return "", fmt.Errorf("未找到 %s 二进制(目录 %s)", name, dir)
 }
 
 // inTermux 判断是否运行在 Termux 环境。

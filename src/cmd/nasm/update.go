@@ -41,7 +41,10 @@ func cmdUpdate(args []string) error {
 	paths := config.Resolve(root)
 
 	// ① 获取新版二进制到临时文件
-	nasdBin := findBinary(paths.BinDir, "nasd")
+	nasdBin, err := findBinary(paths.BinDir, "nasd")
+	if err != nil {
+		return err
+	}
 	tmpNew := nasdBin + ".new"
 	if err := fetchUpdate(source, tmpNew); err != nil {
 		return err
@@ -151,27 +154,43 @@ func probeVersion(bin string) (string, error) {
 	return v, nil
 }
 
-// enterUpdateMode 调用管理通道 daemon.enterUpdate,等待旧进程退出。
+// enterUpdateMode 调用管理通道 daemon.enterUpdate,等待旧进程完全退出
+// (socket 关闭 + 单实例锁释放,确保可安全替换二进制)。
 func enterUpdateMode(paths config.Paths) error {
 	client, err := mgmt.NewClient(paths.SockPath, mustToken(paths))
 	if err != nil {
 		return err
 	}
-	defer client.Close()
 	var res map[string]bool
 	if err := client.Call(mgmt.MethodEnterUpdate, nil, &res); err != nil {
+		client.Close()
 		return err
 	}
+	// 立即关闭连接:避免 nasd 端管理服务等待在途连接而延迟退出
+	client.Close()
 	fmt.Println("nasd 已确认进入更新模式,等待退出...")
-	// 轮询等待进程退出
+	// ① 等待管理通道关闭(进程停止服务)
 	for i := 0; i < 100; i++ {
 		if _, err := mgmt.NewClient(paths.SockPath, mustToken(paths)); err != nil {
 			_ = mgmt.Cleanup(paths.SockPath)
-			return nil
+			break
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
-	return fmt.Errorf("等待 nasd 退出超时")
+	// ② 等待单实例锁释放(进程完全退出,二进制才可安全替换)
+	lockPath := filepath.Join(paths.RunDir, "nas.lock")
+	for i := 0; i < 50; i++ { // 最长 5s
+		release, err := mgmt.AcquireLock(lockPath)
+		if err == nil {
+			_ = release()
+			return nil
+		}
+		if i == 0 || i%10 == 9 {
+			fmt.Printf("  等待锁释放... [%d/50] %v\n", i+1, err)
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	return fmt.Errorf("等待旧进程完全退出超时(单实例锁仍被占用)")
 }
 
 // atomicReplace 原子替换:旧版 → .bak,新版 → bin。
@@ -225,7 +244,10 @@ func cmdSelfUpdate(args []string) error {
 		source = fs.Arg(0)
 	}
 	paths := config.Resolve(root)
-	nasmBin := findBinary(paths.BinDir, "nasm")
+	nasmBin, err := findBinary(paths.BinDir, "nasm")
+	if err != nil {
+		return err
+	}
 	tmpNew := nasmBin + ".new"
 	if err := fetchUpdate(source, tmpNew); err != nil {
 		return err
@@ -244,7 +266,10 @@ func cmdSelfUpdate(args []string) error {
 	if err := atomicReplace(nasmBin, tmpNew, backup); err != nil {
 		return err
 	}
-	os.Remove(backup)
+	// 清理备份;失败仅警告(Windows 上正在运行的可执行文件可能被锁定)
+	if err := os.Remove(backup); err != nil {
+		fmt.Fprintf(os.Stderr, "nasm: 警告: 清理备份失败(可手动删除 %s): %v\n", backup, err)
+	}
 	fmt.Println("nasm 自身更新完成(下次执行生效)")
 	return nil
 }

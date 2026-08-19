@@ -50,11 +50,12 @@ func (s *Server) Serve() error {
 	}
 }
 
-// Close 关闭 listener 并等待在途连接结束。
+// Close 关闭 listener。不等待在途连接:
+// 调用场景是进程退出流程(daemon.stop/enterUpdate),等待会导致
+// nasm 侧锁循环与 nasd 侧连接处理互相等待(死锁)。进程退出时
+// 操作系统自动关闭所有连接句柄,在途 goroutine 随进程结束。
 func (s *Server) Close() error {
-	err := s.ln.Close()
-	s.wg.Wait()
-	return err
+	return s.ln.Close()
 }
 
 func (s *Server) handleConn(conn net.Conn) {

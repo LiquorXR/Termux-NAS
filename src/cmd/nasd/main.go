@@ -66,6 +66,7 @@ func main() {
 		logger.Error("nasd 异常退出", "err", err)
 		os.Exit(1)
 	}
+	logger.Info("nasd Run 已返回,进程即将退出")
 }
 
 // newLogger 日志同时输出到 stderr 与 data/logs/nasd.log。

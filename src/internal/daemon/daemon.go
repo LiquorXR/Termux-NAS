@@ -153,7 +153,9 @@ func (d *Daemon) Run(ctx context.Context) error {
 		}
 	}
 
-	return d.Stop()
+	stopErr := d.Stop()
+	d.log.Info("Stop 完成,Run 即将返回")
+	return stopErr
 }
 
 // Stop 优雅停止:先停插件进程,再关 HTTP,最后清理管理通道退出。
@@ -164,7 +166,9 @@ func (d *Daemon) Stop() error {
 			d.pm.ShutdownAll()
 		}
 		if d.app != nil {
-			if err := d.app.Shutdown(); err != nil {
+			// 带超时关闭:避免 keep-alive 连接长期阻塞进程退出
+			// (阻塞会导致单实例锁不释放,nasm update 无法替换二进制)
+			if err := d.app.ShutdownWithTimeout(3 * time.Second); err != nil {
 				d.log.Warn("HTTP 关闭异常", "err", err)
 				firstErr = err
 			}
