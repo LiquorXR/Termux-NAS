@@ -38,6 +38,7 @@ type Daemon struct {
 	auth  *auth.Store
 	files *files.Store
 	app   *fiber.App
+	pm    *Manager // 插件管理器(M4)
 
 	mgmtLn  net.Listener
 	mgmtSrv *mgmt.Server
@@ -87,12 +88,12 @@ func (d *Daemon) Run(ctx context.Context) error {
 	}
 	d.files = files.NewStore(fileRoot, d.db, d.log)
 
-	// 2) 插件扫描:登记元信息,不启动进程(懒加载,M4 完善)
-	plugins, err := d.scanPlugins()
-	if err != nil {
+	// 2) 插件管理器:扫描登记元信息,不启动进程(懒加载)
+	d.pm = NewManager(d.paths.Plugins, d.log)
+	if _, err := d.pm.Scan(); err != nil {
 		d.log.Warn("插件扫描失败", "err", err)
 	} else {
-		d.log.Info("插件扫描完成", "count", len(plugins))
+		d.log.Info("插件扫描完成", "count", len(d.pm.List()))
 	}
 
 	// 3) 用户通道 HTTP :7531
@@ -132,11 +133,12 @@ func (d *Daemon) Run(ctx context.Context) error {
 }
 
 // Stop 优雅停止:先停插件进程,再关 HTTP,最后清理管理通道退出。
-// 插件停止逻辑在 M4 接入插件管理器后实现,当前为占位。
 func (d *Daemon) Stop() error {
 	var firstErr error
 	d.stopOnce.Do(func() {
-		d.log.Info("停止插件进程(占位)")
+		if d.pm != nil {
+			d.pm.ShutdownAll()
+		}
 		if d.app != nil {
 			if err := d.app.Shutdown(); err != nil {
 				d.log.Warn("HTTP 关闭异常", "err", err)
