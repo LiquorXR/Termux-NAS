@@ -81,7 +81,7 @@ nasm status                         # 或直接: sv start nasd
 | **M2** | 认证中心 + 前端壳(登录页/布局/HTMX)+ SQLite 会话 | ✅ |
 | **M3** | 内建模块:文件管理 + 系统监控(HTMX 轮询看板) | ✅ |
 | **M4** | 插件系统:管理器 API + 注册协议 + 反代 + 懒加载 + download 插件 | ✅ |
-| M5 | 服务控制 + 备份中心 + 安全加固 | ⏳ |
+| **M5** | 服务控制 + 备份中心 + 安全加固 | ✅ |
 | M6 | nasm update 更新流程 + 插件市场 + PWA + Tailscale 集成 | ⏳ |
 
 ## M4 插件系统(已实现)
@@ -107,6 +107,27 @@ fmt.Printf(`{"id":"download","name":"下载中心","version":"1.0.0",
 - 监听 `127.0.0.1:<port>`(可由 `--port` 指定,0 为随机)
 - 提供 `GET /health` 返回 200(供探活)
 - 打包为 `.tar.gz`(内含单个可执行文件),在 Web UI「插件」页上传安装
+
+## M5 服务控制 + 备份中心 + 安全加固(已实现)
+
+### 服务控制
+- `internal/svc`:基于 termux-services(runit)的服务启停/重启/自启,解析 `sv status` 输出
+- 内置服务目录:sshd / samba / nginx / aria2 / cron / mysql
+- 平台适配:Termux/Linux 真实执行;Windows 开发环境自动模拟(MockRunner)
+- API:`/api/svc/list|start|stop|restart|autostart`;Web UI「服务」页(5s 轮询)
+
+### 备份中心
+- `internal/backup`:任务 CRUD(SQLite 持久化)+ cron 调度 + 执行器 + 完成通知
+- 调度:5 字段 cron 表达式(支持 `* / , -`),每分钟检查到期任务
+- 执行:rsync 优先(增量/远程地址),降级本地复制;支持恢复(方向反转)
+- 完成通知:termux-notification(可注入替换)
+- API:`/api/backup/jobs|run|restore`;Web UI「备份」页
+
+### 安全加固
+- 登录失败限流:按 IP 连续 5 次失败锁定 15 分钟(429 + Retry-After)
+- 安全响应头:CSP / X-Frame-Options DENY / nosniff / no-referrer
+- 登录页/设置页 `Cache-Control: no-store`
+- 文件上传单文件上限 256 MiB
 
 ## 关键设计决策
 
