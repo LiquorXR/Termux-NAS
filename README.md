@@ -82,7 +82,27 @@ nasm status                         # 或直接: sv start nasd
 | **M3** | 内建模块:文件管理 + 系统监控(HTMX 轮询看板) | ✅ |
 | **M4** | 插件系统:管理器 API + 注册协议 + 反代 + 懒加载 + download 插件 | ✅ |
 | **M5** | 服务控制 + 备份中心 + 安全加固 | ✅ |
-| M6 | nasm update 更新流程 + 插件市场 + PWA + Tailscale 集成 | ⏳ |
+| **M6** | nasm update 更新流程 + 插件市场 + PWA + Tailscale 集成 | ✅ |
+
+## M6 更新流程 + 插件市场 + PWA(已实现)
+
+### nasm update 原子更新
+- `nasm update [url|file]`:下载 → SHA256 校验 → `daemon.enterUpdate` 优雅停止 → 原子替换(旧版 .bak 备份) → 重启 → 失败回滚
+- `nasm self-update`:同流程更新 nasm 自身
+- `nasm update -f`:跳过版本检查强制更新;版本相同自动跳过
+- 修复:管理通道在途连接导致的进程退出死锁(Server.Close 不再等待连接)
+
+### 插件市场
+- `internal/market`:内嵌官方市场索引(go:embed),download/alist/media/photos
+- API:`GET /api/market`(浏览+已装状态)、`POST /api/market/install`(一键安装)
+- Web UI:「市场」页(卡片浏览/安装状态/一键安装)
+
+### PWA
+- manifest.json(standalone/主题色/图标)+ icon.svg + service worker(离线壳缓存)
+- 导航请求网络优先失败回退缓存;静态资源缓存优先;API 不缓存
+
+### Tailscale 集成
+- 文档引导:安装 Tailscale 后直接以局域网 IP 访问,或通过 Tailscale 分配的内网 IP 远程访问(见开发文档 §8 远程访问)
 
 ## M4 插件系统(已实现)
 
