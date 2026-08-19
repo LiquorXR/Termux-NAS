@@ -115,6 +115,11 @@ func (d *Daemon) Run(ctx context.Context) error {
 	}
 	defer d.stopMgmt()
 
+	// 5) 插件空闲回收 ticker(懒加载释放资源)
+	reapCtx, reapCancel := context.WithCancel(ctx)
+	defer reapCancel()
+	go d.reapLoop(reapCtx)
+
 	d.log.Info("nasd 已就绪", "version", version.String(), "pid", os.Getpid(),
 		"root", d.paths.Root)
 
@@ -160,6 +165,26 @@ func (d *Daemon) requestStop() {
 }
 
 // --- mgmt.Handler 实现(仅生命周期方法,见开发文档 §4.2) ---
+
+// reapLoop 周期扫描空闲插件并回收(懒加载配套)。
+func (d *Daemon) reapLoop(ctx context.Context) {
+	if d.cfg.PluginIdleTimeout <= 0 {
+		return
+	}
+	idle := time.Duration(d.cfg.PluginIdleTimeout) * time.Second
+	ticker := time.NewTicker(idle / 2) // 半周期扫描一次
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if reaped := d.pm.Reap(idle); len(reaped) > 0 {
+				d.log.Info("空闲插件已回收", "ids", reaped)
+			}
+		}
+	}
+}
 
 // Handle 分发管理通道请求。
 func (d *Daemon) Handle(method string, params json.RawMessage) (json.RawMessage, *mgmt.RPCError) {

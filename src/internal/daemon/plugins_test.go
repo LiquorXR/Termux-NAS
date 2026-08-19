@@ -145,79 +145,6 @@ func TestRestart(t *testing.T) {
 	}
 }
 
-func TestCrashCountsAndCrashLoop(t *testing.T) {
-	m, pluginsDir := newTestManager(t)
-	name := buildHelper(t, pluginsDir)
-	if _, err := m.Scan(); err != nil {
-		t.Fatal(err)
-	}
-
-	// 让插件启动即崩溃
-	t.Setenv("NAS_HELPER_CRASH", "1")
-
-	for i := 1; i <= maxRestarts; i++ {
-		if err := m.Start(name); err != nil {
-			t.Fatalf("第 %d 次 Start: %v", i, err)
-		}
-		// 等待崩溃被 watchExit 检测到
-		info, _ := m.Get(name)
-		eventually(t, 3*time.Second, func() bool {
-			info, _ = m.Get(name)
-			return info.State == StateCrashed || info.State == StateCrashLoop
-		}, "进程崩溃状态")
-		info, _ = m.Get(name)
-		if info.Restarts != i {
-			t.Errorf("第 %d 次崩溃后 Restarts = %d", i, info.Restarts)
-		}
-		if i < maxRestarts && info.State != StateCrashed {
-			t.Errorf("第 %d 次应处于 crashed,得到 %s", i, info.State)
-		}
-		if i == maxRestarts && info.State != StateCrashLoop {
-			t.Errorf("第 %d 次应进入 crash-loop,得到 %s", i, info.State)
-		}
-	}
-
-	// crash-loop 状态下禁止启动
-	if err := m.Start(name); err != ErrCrashLoop {
-		t.Errorf("crash-loop 下 Start 应返回 ErrCrashLoop,得到 %v", err)
-	}
-}
-
-func TestCrashThenManualRestartResets(t *testing.T) {
-	m, pluginsDir := newTestManager(t)
-	name := buildHelper(t, pluginsDir)
-	if _, err := m.Scan(); err != nil {
-		t.Fatal(err)
-	}
-
-	// 崩溃一次
-	t.Setenv("NAS_HELPER_CRASH", "1")
-	if err := m.Start(name); err != nil {
-		t.Fatal(err)
-	}
-	eventually(t, 3*time.Second, func() bool {
-		info, _ := m.Get(name)
-		return info.State == StateCrashed
-	}, "崩溃状态")
-
-	// 手动 Stop 复位(容忍 ErrNotRunning,因进程已退出)
-	_ = m.Stop(name)
-	info, _ := m.Get(name)
-	if info.State != StateStopped || info.Restarts != 0 {
-		t.Errorf("手动复位后应为 stopped/restarts=0,得到 %s/%d", info.State, info.Restarts)
-	}
-
-	// 恢复正常插件,可再次启动
-	t.Setenv("NAS_HELPER_CRASH", "")
-	if err := m.Start(name); err != nil {
-		t.Fatalf("复位后重新 Start: %v", err)
-	}
-	eventually(t, 3*time.Second, func() bool {
-		info, _ := m.Get(name)
-		return info.State == StateRunning
-	}, "重新运行")
-}
-
 func TestNotFound(t *testing.T) {
 	m, _ := newTestManager(t)
 	if _, err := m.Scan(); err != nil {
@@ -244,5 +171,132 @@ func TestShutdownAll(t *testing.T) {
 	info, _ := m.Get(name)
 	if info.State != StateStopped {
 		t.Fatalf("ShutdownAll 后应为 stopped,得到 %s", info.State)
+	}
+}
+
+// --- P2 注册协议 + 懒加载 + 空闲回收 ---
+
+func TestStartRegisters(t *testing.T) {
+	m, pluginsDir := newTestManager(t)
+	name := buildHelper(t, pluginsDir)
+	if _, err := m.Scan(); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Start(name); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	info, _ := m.Get(name)
+	if info.State != StateRunning {
+		t.Fatalf("注册成功后状态应为 running,得到 %s", info.State)
+	}
+	if info.Reg == nil {
+		t.Fatal("应登记注册信息 Reg")
+	}
+	if info.Reg.ID != name {
+		t.Errorf("Reg.ID = %q,期望 %q", info.Reg.ID, name)
+	}
+	if info.Reg.Port <= 0 {
+		t.Errorf("Reg.Port 应为正数,得到 %d", info.Reg.Port)
+	}
+	_ = m.Stop(name)
+}
+
+func TestStartRegTimeout(t *testing.T) {
+	m, pluginsDir := newTestManager(t)
+	name := buildHelper(t, pluginsDir)
+	if _, err := m.Scan(); err != nil {
+		t.Fatal(err)
+	}
+	// 插件不输出注册 JSON → 注册超时,启动失败
+	t.Setenv("NAS_HELPER_NO_REG", "1")
+	if err := m.Start(name); err == nil {
+		t.Fatal("不输出注册信息时 Start 应报错")
+	}
+	// 注册超时(5s)杀进程 → watchExit 按崩溃处理 → crashed/crash-loop
+	eventually(t, 10*time.Second, func() bool {
+		info, _ := m.Get(name)
+		return info.State == StateCrashed || info.State == StateCrashLoop
+	}, "注册失败后状态收敛")
+}
+
+func TestEnsureRunningLazyStart(t *testing.T) {
+	m, pluginsDir := newTestManager(t)
+	name := buildHelper(t, pluginsDir)
+	if _, err := m.Scan(); err != nil {
+		t.Fatal(err)
+	}
+	// 未启动时 EnsureRunning 应懒加载启动并完成注册
+	info, err := m.EnsureRunning(name)
+	if err != nil {
+		t.Fatalf("EnsureRunning: %v", err)
+	}
+	if info.State != StateRunning {
+		t.Fatalf("懒加载后应为 running,得到 %s", info.State)
+	}
+	if info.Reg == nil || info.Reg.Port <= 0 {
+		t.Fatalf("懒加载后应完成注册,Reg=%+v", info.Reg)
+	}
+	// 再次调用应复用运行中实例
+	info2, err := m.EnsureRunning(name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info2.PID != info.PID {
+		t.Errorf("二次 EnsureRunning 应复用同一进程,PID %d vs %d", info.PID, info2.PID)
+	}
+	_ = m.Stop(name)
+}
+
+func TestReapIdle(t *testing.T) {
+	m, pluginsDir := newTestManager(t)
+	name := buildHelper(t, pluginsDir)
+	if _, err := m.Scan(); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Start(name); err != nil {
+		t.Fatal(err)
+	}
+	// 主动 Touch 一次(模拟访问),然后等 idle=0 回收
+	m.Touch(name)
+	time.Sleep(20 * time.Millisecond)
+	reaped := m.Reap(10 * time.Millisecond)
+	if len(reaped) != 1 || reaped[0] != name {
+		t.Fatalf("应回收 %q,得到 %v", name, reaped)
+	}
+	info, _ := m.Get(name)
+	if info.State != StateStopped {
+		t.Fatalf("回收后应为 stopped,得到 %s", info.State)
+	}
+}
+
+func TestAutoRestartAfterCrash(t *testing.T) {
+	m, pluginsDir := newTestManager(t)
+	name := buildHelper(t, pluginsDir)
+	if _, err := m.Scan(); err != nil {
+		t.Fatal(err)
+	}
+	// 插件启动即崩溃 → Start 返回注册失败(允许),watchExit 自动重启(带退避)
+	t.Setenv("NAS_HELPER_CRASH", "1")
+	_ = m.Start(name) // 崩溃插件注册失败,错误可忽略
+	// 连续崩溃应最终进入 crash-loop(自动重启 3 次后停止)
+	eventually(t, 20*time.Second, func() bool {
+		info, _ := m.Get(name)
+		return info.State == StateCrashLoop
+	}, "崩溃循环后进入 crash-loop")
+	info, _ := m.Get(name)
+	if info.Restarts < maxRestarts {
+		t.Errorf("Restarts 应 >= %d,得到 %d", maxRestarts, info.Restarts)
+	}
+	// crash-loop 下 Start 应被拒绝
+	if err := m.Start(name); err != ErrCrashLoop {
+		t.Errorf("crash-loop 下 Start 应返回 ErrCrashLoop,得到 %v", err)
+	}
+	// Stop 复位后可重新启动
+	t.Setenv("NAS_HELPER_CRASH", "")
+	if err := m.Stop(name); err != nil {
+		t.Fatalf("Stop 复位: %v", err)
+	}
+	if err := m.Start(name); err != nil {
+		t.Fatalf("复位后 Start: %v", err)
 	}
 }

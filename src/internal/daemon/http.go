@@ -113,6 +113,10 @@ func (d *Daemon) buildHTTP() (*fiber.App, error) {
 	// /api/plugins/* 插件管理器
 	// /p/<id>/*   插件反代(M4)
 
+	// --- M4 插件反代(懒加载入口,统一鉴权) ---
+	app.All("/p/:id/*", d.auth.RequireAuth, d.pluginProxy)
+	app.All("/p/:id", d.auth.RequireAuth, d.pluginProxy)
+
 	// 前端静态资源(嵌入二进制)
 	sub, err := fs.Sub(webui.Static, "static")
 	if err != nil {
