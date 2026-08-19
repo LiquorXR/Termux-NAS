@@ -79,10 +79,34 @@ nasm status                         # 或直接: sv start nasd
 |--------|------|------|
 | **M1** | 项目骨架:go.mod、nasm CLI、nasd 守护、Unix socket 管理通道、start/stop/status | ✅ |
 | **M2** | 认证中心 + 前端壳(登录页/布局/HTMX)+ SQLite 会话 | ✅ |
-| **M3** | 内建模块:文件管理 + 系统监控(HTMX 轮询看板) | ✅ 当前 |
-| M4 | 插件系统:管理器 API + 注册协议 + 反代 + 懒加载 + download 插件 | ⏳ |
+| **M3** | 内建模块:文件管理 + 系统监控(HTMX 轮询看板) | ✅ |
+| **M4** | 插件系统:管理器 API + 注册协议 + 反代 + 懒加载 + download 插件 | ✅ |
 | M5 | 服务控制 + 备份中心 + 安全加固 | ⏳ |
 | M6 | nasm update 更新流程 + 插件市场 + PWA + Tailscale 集成 | ⏳ |
+
+## M4 插件系统(已实现)
+
+- **插件管理器**:状态机(stopped/starting/running/stopping/crashed/crash-loop)、进程生命周期、跨平台可执行判定(扩展名 + MZ/ELF/shebang 文件头探测)
+- **注册协议**:插件启动后向 stdout 输出注册 JSON(id/name/version/port/nav/icon),5s 超时判失败
+- **崩溃恢复**:自动重启(带退避),连续 3 次进入 crash-loop,Stop 人工复位
+- **懒加载**:首次访问 `/p/<id>/*` 自动启动,空闲超时回收(默认 10 分钟)
+- **反向代理**:`/p/<id>/*` → `127.0.0.1:<插件端口>/*`,统一鉴权,保留路径与查询参数
+- **管理 API**:`/api/plugins/*` 列表/安装(上传或 URL)/启停/重启/卸载/日志
+- **Web UI**:「插件」页支持安装、启停、重启、卸载,状态 3s 轮询
+
+### 插件开发速览
+
+插件是独立可执行文件,遵循注册协议:
+
+```go
+// 插件启动后向 stdout 输出一行注册 JSON 即可被 nasd 接管
+fmt.Printf(`{"id":"download","name":"下载中心","version":"1.0.0",
+  "port":%d,"nav":"下载","icon":"download"}`+"\n", actualPort)
+```
+
+- 监听 `127.0.0.1:<port>`(可由 `--port` 指定,0 为随机)
+- 提供 `GET /health` 返回 200(供探活)
+- 打包为 `.tar.gz`(内含单个可执行文件),在 Web UI「插件」页上传安装
 
 ## 关键设计决策
 
