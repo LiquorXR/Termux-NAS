@@ -24,15 +24,18 @@
 # 环境变量(可覆盖):
 #   NAS_ROOT      部署根,默认 $HOME/nas
 #   NAS_REPO      GitHub 仓库,默认 LiquorXR/Termux-NAS
+#   NAS_MIRROR    GitHub 加速镜像前缀,默认 https://ghfast.top/
+#                 (置空则直连 github.com;国内网络建议保留默认加速)
 #   NAS_DIST_URL  资产下载基地址(默认按 GitHub Releases 构造;
-#                 镜像/本地测试时可指向自定义 URL/file folder)
+#                 镜像/本地测试时可指向自定义 URL/file folder,优先级最高)
 #   NAS_ARCH      架构覆盖(默认按 uname -m 检测;开发机测试可设 arm64)
 # =============================================================================
 set -euo pipefail
 
-NAS_SCRIPT_VERSION="2.0.0"
+NAS_SCRIPT_VERSION="2.1.0"
 NAS_ROOT="${NAS_ROOT:-$HOME/nas}"
 NAS_REPO="${NAS_REPO:-LiquorXR/Termux-NAS}"
+NAS_MIRROR="${NAS_MIRROR:-https://ghfast.top/}"
 PORT_DEFAULT=7531
 
 # 资产命名(与 .github/workflows/release.yml 输出一致,勿改)
@@ -105,6 +108,18 @@ ensure_dirs() {
 }
 
 # ---------------- 下载与校验 ----------------
+# 给 GitHub 直链加镜像前缀加速(NAS_MIRROR 置空则直连)
+github_url() {
+  local url="$1"
+  if [ -n "${NAS_MIRROR:-}" ]; then
+    printf '%s%s' "${NAS_MIRROR%/}" "$url"
+  else
+    printf '%s' "$url"
+  fi
+}
+
+# 构造资产下载基地址;channel 为 latest 或语义化版本号(不含 v)。
+# NAS_DIST_URL 优先(镜像/本地测试用);否则默认走 ghfast.top 加速的 GitHub Releases。
 release_base_url() {
   local channel="$1"
   if [ -n "${NAS_DIST_URL:-}" ]; then
@@ -112,9 +127,9 @@ release_base_url() {
     return
   fi
   if [ "$channel" = "latest" ]; then
-    printf 'https://github.com/%s/releases/latest/download' "$NAS_REPO"
+    github_url "https://github.com/$NAS_REPO/releases/latest/download"
   else
-    printf 'https://github.com/%s/releases/download/v%s' "$NAS_REPO" "$channel"
+    github_url "https://github.com/$NAS_REPO/releases/download/v$channel"
   fi
 }
 
@@ -487,7 +502,8 @@ cmd_uninstall() {
 
 # ---------------- 脚本自身更新 ----------------
 cmd_self_update() {
-  local url="https://raw.githubusercontent.com/$NAS_REPO/main/nas.sh"
+  local url
+  url="$(github_url "https://raw.githubusercontent.com/$NAS_REPO/main/nas.sh")"
   local tmp; tmp="$(mktemp -d)"; NAS_TMP="$tmp"
   info "从 $url 拉取最新脚本"
   curl -fL --retry 3 --connect-timeout 20 --max-time 60 -o "$tmp/nas.sh" "$url" \
@@ -524,7 +540,8 @@ Termux NAS 一键管理脚本(nas.sh)
 环境变量:
   NAS_ROOT      部署根(默认 $HOME/nas)
   NAS_REPO      GitHub 仓库(默认 LiquorXR/Termux-NAS)
-  NAS_DIST_URL  资产下载基地址(镜像/本地测试用,默认 GitHub Releases)
+  NAS_MIRROR    GitHub 加速镜像前缀(默认 https://ghfast.top/,置空则直连)
+  NAS_DIST_URL  资产下载基地址(镜像/本地测试用,优先级最高)
   NAS_ARCH      架构覆盖(默认按 uname -m 检测;开发机测试可设 arm64)
 
 一键体验:
