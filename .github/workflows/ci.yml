@@ -25,6 +25,15 @@ jobs:
           cache: npm
           cache-dependency-path: src/web/package-lock.json
 
+      # 必须先构建前端:nasd 经 go:embed 嵌入 src/internal/webui/dist,
+      # 而该目录被 .gitignore 排除、不随仓库提交;任何 Go 编译(vet/build/test)
+      # 之前都必须先生成 dist,否则报 "pattern dist: no matching files found"。
+      - name: Frontend build
+        working-directory: src/web
+        run: |
+          npm ci
+          npm run build
+
       - name: Format check
         working-directory: src
         run: |
@@ -46,12 +55,6 @@ jobs:
       - name: Test (race)
         working-directory: src
         run: go test -race ./...
-
-      - name: Frontend build
-        working-directory: src/web
-        run: |
-          npm ci
-          npm run build
 
       - name: Android cross-compile
         working-directory: src
