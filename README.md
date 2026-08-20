@@ -4,7 +4,7 @@
 
 - **架构**:单一主框架守护进程 `nasd` + 插件(独立二进制);仓库根脚本 `nas.sh`
   全周期管理 nasd 的生命周期(安装/更新/启停/状态/日志/卸载)
-- **技术栈**:Go + Fiber + SQLite(WAL)+ HTMX + Tailwind(daisyUI)
+- **技术栈**:Go + Fiber + SQLite(WAL)+ HTMX + 原生 JS/CSS(Vite 构建)
 - **部署环境**:Termux,无 root、高位端口、termux-services 守护;**一键脚本 `nas.sh`
   安装/更新/启停,无需手机安装 Go**
 - **当前阶段**:M3 文件管理 + 系统监控(见 [里程碑](#里程碑))
@@ -206,6 +206,5 @@ fmt.Printf(`{"id":"download","name":"下载中心","version":"1.0.0",
 
 ## 文档
 
-- `场景调研.md` — 26 个产品方向 × 六维评分(决策依据)
-- `技术栈建议.md` — Go + SQLite + HTMX 选型论证
-- `NAS框架开发文档.md` — 本文档来源(架构/API/安全/里程碑)
+- `docs/NAS框架开发文档.md` — 架构 / API / 安全 / 里程碑(唯一正式文档)
+- 产品选型调研(`场景调研.md`、`技术栈建议.md`)为早期草稿,未随仓库维护,已不收录
