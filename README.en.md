@@ -13,7 +13,6 @@ A **pluggable mobile NAS** that runs inside Termux (the Linux environment on And
 |---|---|---|
 | [Project Guide (English)](docs/PROJECT_GUIDE.en-US.md) | EN | Complete reference: architecture, modules, API, security, deployment |
 | [Project Guide (中文)](docs/PROJECT_GUIDE.zh-CN.md) | ZH | 完整参考:架构、模块、API、安全、部署 |
-| [NAS Framework Dev Doc (中文)](docs/NAS框架开发文档.md) | ZH | Canonical developer document (architecture / API / security / milestones) |
 
 ## Directory Layout
 

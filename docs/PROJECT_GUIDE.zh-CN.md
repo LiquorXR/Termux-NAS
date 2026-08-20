@@ -147,7 +147,6 @@
 │   ├── ci.yml                   # 全量质量门禁(gofmt/vet/test/race/android/smoke)
 │   └── release.yml              # 推送 v* 标签 → 构建并发布 android/arm64
 ├── docs/
-│   ├── NAS框架开发文档.md        # 正式开发文档(中文)
 │   ├── PROJECT_GUIDE.zh-CN.md   # 本文档(中文)
 │   └── PROJECT_GUIDE.en-US.md   # 本文档(English)
 └── src/

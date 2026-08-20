@@ -145,7 +145,7 @@ bash ../nas.sh start                # 前台启动 nasd(日志直打,Ctrl+C 优�
 - 导航请求网络优先失败回退缓存;静态资源缓存优先;API 不缓存
 
 ### Tailscale 集成
-- 文档引导:安装 Tailscale 后直接以局域网 IP 访问,或通过 Tailscale 分配的内网 IP 远程访问(见开发文档 §8 远程访问)
+- 文档引导:安装 Tailscale 后直接以局域网 IP 访问,或通过 Tailscale 分配的内网 IP 远程访问(见[完整项目文档](docs/PROJECT_GUIDE.zh-CN.md) §15 安全设计)
 
 ## M4 插件系统(已实现)
 
@@ -209,6 +209,5 @@ fmt.Printf(`{"id":"download","name":"下载中心","version":"1.0.0",
 | [完整项目文档(中文)](docs/PROJECT_GUIDE.zh-CN.md) | 中文 | 完整参考:架构、模块、API、配置、安全、部署、FAQ |
 | [Complete Project Documentation (English)](docs/PROJECT_GUIDE.en-US.md) | English | Full reference: architecture, modules, API, config, security, deployment, FAQ |
 | [README(English)](README.en.md) | English | English quick start & overview |
-| [NAS 框架开发文档](docs/NAS框架开发文档.md) | 中文 | 正式开发文档:架构 / API / 安全 / 里程碑 |
 
 > 产品选型调研(`场景调研.md`、`技术栈建议.md`)为早期草稿,未随仓库维护,已不收录。

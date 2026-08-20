@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # nas.sh 冒烟测试(开发机/CI/Termux 均可)
 #
-# 主程序为单一二进制 nasd(nasm 已移除)。分两层:
+# 主程序为单一二进制 nasd。分两层:
 #   A. 机制断言(所有 bash 环境可跑):目录结构 / 下载 / SHA256 校验门禁 /
 #      .bak 备份 / 同版本跳过 / 强制替换 / 篡改拒绝 / 卸载保护与清理
 #   B. 运行时断言(仅 Linux/WSL/Termux):start(后台化)/status/log/restart/stop、

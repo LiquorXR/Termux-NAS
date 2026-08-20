@@ -152,7 +152,6 @@ Conventions:
 │   ├── ci.yml                   # full quality gate (format/vet/test/race/android/smoke)
 │   └── release.yml              # push v* tag → build & publish android/arm64
 ├── docs/
-│   ├── NAS框架开发文档.md        # canonical developer document (中文)
 │   ├── PROJECT_GUIDE.zh-CN.md   # this guide (中文)
 │   └── PROJECT_GUIDE.en-US.md   # this guide (English)
 └── src/
