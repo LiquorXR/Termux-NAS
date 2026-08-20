@@ -140,13 +140,14 @@ if [ "$IS_LINUX" = "1" ]; then
   [ -f "$NAS_ROOT/bin/nasd.bak" ] || { bad "运行中更新未留下 .bak"; exit 1; }
   ok "运行中更新正常(停止+替换+重启,保留 .bak)"
 
+  step "运行时: doctor 体检(在 nasd 运行中执行,健康探活才有意义)"
+  bash "$ROOT/nas.sh" doctor || { bad "doctor 失败"; exit 1; }
+  ok "doctor 体检通过"
+
   bash "$ROOT/nas.sh" stop || { bad "stop 失败"; exit 1; }
   sleep 1
   bash "$ROOT/nas.sh" status >/dev/null && true
   ok "stop 正常"
-
-  step "运行时: doctor 体检"
-  bash "$ROOT/nas.sh" doctor || { bad "doctor 失败"; exit 1; }
 else
   step "运行时(B 层)"
   echo "  [i] 非 Linux 环境,跳过 start/status/log/update 运行时断言。"
