@@ -59,3 +59,11 @@ jobs:
       - name: Android cross-compile
         working-directory: src
         run: CGO_ENABLED=0 GOOS=android GOARCH=arm64 go build -o /tmp/nasd-android ./cmd/nasd
+
+      # nas.sh 冒烟测试(机制层 + 运行时层):覆盖"脚本化部署/更新/启停/状态/日志/
+      # 校验和篡改防护/卸载",仅需 Linux(bash+curl+go)。复用上方已构建的
+      # 前端 dist(go:embed 需要)与 Go 工具链;脚本自产自销测试用 nasd。
+      - name: nas.sh smoke test
+        working-directory: src
+        run: |
+          bash ../scripts/smoke-test.sh
