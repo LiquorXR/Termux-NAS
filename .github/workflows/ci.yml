@@ -1,0 +1,58 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  test:
+    name: Build & Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: src/go.mod
+          cache: true
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: src/web/package-lock.json
+
+      - name: Format check
+        working-directory: src
+        run: |
+          gofmt -l .
+          test -z "$(gofmt -l .)" || (echo "gofmt 需要修正:" && gofmt -l . && exit 1)
+
+      - name: Go vet
+        working-directory: src
+        run: go vet ./...
+
+      - name: Build (host)
+        working-directory: src
+        run: go build ./...
+
+      - name: Test
+        working-directory: src
+        run: go test ./...
+
+      - name: Test (race)
+        working-directory: src
+        run: go test -race ./...
+
+      - name: Frontend build
+        working-directory: src/web
+        run: |
+          npm ci
+          npm run build
+
+      - name: Android cross-compile
+        working-directory: src
+        run: CGO_ENABLED=0 GOOS=android GOARCH=arm64 go build -o /tmp/nasd-android ./cmd/nasd

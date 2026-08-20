@@ -64,13 +64,16 @@ func CurrentUser(c *fiber.Ctx) *User {
 }
 
 // SetSessionCookie 下发会话 cookie(HttpOnly + SameSite=Lax)。
-func SetSessionCookie(c *fiber.Ctx, token string) {
+// MaxAge 与 SessionTTL 对齐(7 天);secure 由部署模式决定(HTTPS 反代时开启)。
+func SetSessionCookie(c *fiber.Ctx, token string, secure bool) {
 	c.Cookie(&fiber.Cookie{
 		Name:     CookieName,
 		Value:    token,
 		Path:     "/",
 		HTTPOnly: true,
 		SameSite: "Lax",
+		MaxAge:   int(SessionTTL.Seconds()),
+		Secure:   secure,
 	})
 }
 

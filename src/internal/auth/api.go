@@ -57,7 +57,7 @@ func (s *Store) HandleSetup(c *fiber.Ctx) error {
 		s.log.Error("创建会话失败", "user_id", user.ID, "err", err)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "创建用户失败"})
 	}
-	SetSessionCookie(c, sess.Token)
+	SetSessionCookie(c, sess.Token, s.secure)
 	c.Set("HX-Redirect", "/")
 	return c.JSON(fiber.Map{"ok": true})
 }
@@ -71,7 +71,7 @@ func (s *Store) HandleLogin(c *fiber.Ctx) error {
 			c.Set("Retry-After", strconv.Itoa(ra))
 		}
 		return c.Status(fiber.StatusTooManyRequests).JSON(fiber.Map{
-			"error":      "尝试过于频繁,请稍后再试",
+			"error":       "尝试过于频繁,请稍后再试",
 			"retry_after": ra,
 		})
 	}
@@ -94,7 +94,7 @@ func (s *Store) HandleLogin(c *fiber.Ctx) error {
 		s.log.Error("创建会话失败", "user_id", user.ID, "err", err)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "登录失败"})
 	}
-	SetSessionCookie(c, sess.Token)
+	SetSessionCookie(c, sess.Token, s.secure)
 	c.Set("HX-Redirect", "/")
 	return c.JSON(fiber.Map{"ok": true, "username": user.Username})
 }

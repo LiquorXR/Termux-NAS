@@ -46,6 +46,17 @@ test:
 	go vet ./...
 	go test ./...
 
+# 完整质量门禁:格式/静态检查/测试/前端构建(CI 使用)
+check:
+	@echo "==> gofmt 检查"
+	@test -z "$$(gofmt -l .)" || (echo "gofmt 需要修正:" && gofmt -l . && exit 1)
+	@echo "==> go vet"
+	go vet ./...
+	@echo "==> go test"
+	go test ./...
+	@echo "==> 前端构建"
+	@npm --prefix web run build
+
 tidy:
 	go mod tidy
 

@@ -36,12 +36,12 @@ type Service struct {
 // Info 服务状态信息(API 输出)。
 type Info struct {
 	Service
-	State      Status `json:"state"`
-	Autostart  bool   `json:"autostart"`   // 开机自启(已 enable)
-	Pid        int    `json:"pid,omitempty"` // 运行中 PID(sv status 解析)
-	Uptime     string `json:"uptime,omitempty"`
-	Detail     string `json:"detail,omitempty"` // 原始输出摘要
-	LastError  string `json:"last_err,omitempty"`
+	State     Status `json:"state"`
+	Autostart bool   `json:"autostart"`     // 开机自启(已 enable)
+	Pid       int    `json:"pid,omitempty"` // 运行中 PID(sv status 解析)
+	Uptime    string `json:"uptime,omitempty"`
+	Detail    string `json:"detail,omitempty"` // 原始输出摘要
+	LastError string `json:"last_err,omitempty"`
 }
 
 // 内置服务目录(可被用户配置覆盖)。

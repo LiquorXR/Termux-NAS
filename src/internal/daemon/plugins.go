@@ -56,16 +56,16 @@ type PluginRegistration struct {
 
 // PluginInfo 插件磁盘元信息 + 运行状态(对外 API 输出)。
 type PluginInfo struct {
-	ID         string             `json:"id"`
-	Path       string             `json:"path"`
-	Size       int64              `json:"size"`
-	ModTime    time.Time          `json:"mod_time"`
-	State      PluginState        `json:"state"`
-	PID        int                `json:"pid,omitempty"`       // 运行中进程 PID
-	Restarts   int                `json:"restarts"`            // 连续崩溃计数
-	Reg        *PluginRegistration `json:"reg,omitempty"`       // 注册元信息(P2 起)
-	LastActive time.Time          `json:"-"`                   // 最近访问时间(懒加载空闲回收)
-	LastErr    string             `json:"last_err,omitempty"`  // 最近一次错误
+	ID         string              `json:"id"`
+	Path       string              `json:"path"`
+	Size       int64               `json:"size"`
+	ModTime    time.Time           `json:"mod_time"`
+	State      PluginState         `json:"state"`
+	PID        int                 `json:"pid,omitempty"`      // 运行中进程 PID
+	Restarts   int                 `json:"restarts"`           // 连续崩溃计数
+	Reg        *PluginRegistration `json:"reg,omitempty"`      // 注册元信息(P2 起)
+	LastActive time.Time           `json:"-"`                  // 最近访问时间(懒加载空闲回收)
+	LastErr    string              `json:"last_err,omitempty"` // 最近一次错误
 }
 
 // maxRestarts 连续崩溃最大次数,超过进入 crash-loop。

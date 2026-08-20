@@ -1,6 +1,7 @@
 package mgmt
 
 import (
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"io"
@@ -17,10 +18,10 @@ type Handler interface {
 
 // Server 管理通道服务端,循环接受连接并按请求应答。
 type Server struct {
-	ln   net.Listener
-	h    Handler
+	ln    net.Listener
+	h     Handler
 	token string // 管理 token;为空则不校验
-	log  *slog.Logger
+	log   *slog.Logger
 
 	wg sync.WaitGroup
 }
@@ -79,7 +80,8 @@ func (s *Server) handleConn(conn net.Conn) {
 
 func (s *Server) dispatch(req Request) Response {
 	// 鉴权:socket 仅本机可访问,管理 token 为第二道防线。
-	if s.token != "" && req.Auth != s.token {
+	// 恒定时间比较,避免时序侧信道泄露 token。
+	if s.token != "" && subtle.ConstantTimeCompare([]byte(req.Auth), []byte(s.token)) != 1 {
 		return Response{Error: &RPCError{Code: -32001, Message: "管理 token 无效"}, ID: req.ID}
 	}
 	result, rpcErr := s.h.Handle(req.Method, req.Params)

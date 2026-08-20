@@ -31,7 +31,7 @@ esac
 # Termux = Android 上的 Linux(arm64);CGO_ENABLED=0 静态编译,体积最小
 case "$TARGET" in
   android)
-    GOOS="${GOOS:-android}"; GOARCH="${2:-arm64}"; BINEXT="" ;;
+    GOOS="android"; GOARCH="${2:-arm64}"; BINEXT="" ;;
   host)
     : ;;
   *)

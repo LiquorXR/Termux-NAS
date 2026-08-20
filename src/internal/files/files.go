@@ -204,6 +204,11 @@ func (s *Store) serveFile(c *fiber.Ctx, full, name string, inline bool) error {
 	if ctype == "" {
 		ctype = "application/octet-stream"
 	}
+	// 安全防线:可执行内容类型禁止内联渲染(防存储型 XSS),
+	// 一律强制下载,文件根内的 html/svg/xml/js 无法在同源域执行。
+	if inline && isInlineUnsafe(ctype) {
+		inline = false
+	}
 	c.Set("Content-Type", ctype)
 	c.Set("Content-Length", strconv.FormatInt(info.Size(), 10))
 	if !inline {
@@ -211,6 +216,18 @@ func (s *Store) serveFile(c *fiber.Ctx, full, name string, inline bool) error {
 	}
 	c.Context().SetBodyStream(f, int(info.Size()))
 	return nil
+}
+
+// isInlineUnsafe 判断 MIME 类型是否可在浏览器内联执行脚本(存储型 XSS 风险)。
+func isInlineUnsafe(ctype string) bool {
+	ct := strings.ToLower(strings.TrimSpace(strings.SplitN(ctype, ";", 2)[0]))
+	switch ct {
+	case "text/html", "application/xhtml+xml", "image/svg+xml",
+		"text/xml", "application/xml", "text/javascript", "application/javascript",
+		"application/json":
+		return true
+	}
+	return false
 }
 
 // HandleRename POST /api/files/rename {path, new_name}(new_name 亦可经 HX-Prompt 头传递)。

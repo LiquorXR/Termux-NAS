@@ -8,9 +8,9 @@ import (
 	"time"
 
 	"github.com/gofiber/fiber/v2"
-	"github.com/valyala/fasthttp/fasthttpadaptor"
 	"github.com/termux-nas/nas/internal/version"
 	"github.com/termux-nas/nas/internal/webui"
+	"github.com/valyala/fasthttp/fasthttpadaptor"
 )
 
 // buildHTTP 组装用户通道路由(:7531)。

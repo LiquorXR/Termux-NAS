@@ -77,10 +77,39 @@ func Collect(root string) Summary {
 }
 
 // batteryStats 电量与温度(仅 Termux,经 termux-battery-status)。
+// 带 10s 结果缓存:监控页轮询时避免每请求拉起一次子进程。
 func batteryStats() (Battery, bool) {
 	if os.Getenv("PREFIX") == "" {
 		return Battery{}, false // 非 Termux 环境
 	}
+	batteryMu.Lock()
+	if !batteryCachedAt.IsZero() && time.Since(batteryCachedAt) < batteryCacheTTL {
+		b := batteryCache
+		batteryMu.Unlock()
+		return b, batteryCachedOK
+	}
+	batteryMu.Unlock()
+
+	b, ok := batteryStatsUncached()
+	batteryMu.Lock()
+	batteryCache, batteryCachedOK = b, ok
+	batteryCachedAt = time.Now()
+	batteryMu.Unlock()
+	return b, ok
+}
+
+// batteryCacheTTL 电池采集缓存时长(轮询合并,降低子进程开销)。
+const batteryCacheTTL = 10 * time.Second
+
+var (
+	batteryMu       sync.Mutex
+	batteryCache    Battery
+	batteryCachedAt time.Time
+	batteryCachedOK bool
+)
+
+// batteryStatsUncached 实际执行 termux-battery-status 采集(变量形式便于测试注入)。
+var batteryStatsUncached = func() (Battery, bool) {
 	out, err := exec.Command("termux-battery-status").Output()
 	if err != nil {
 		return Battery{}, false

@@ -4,16 +4,17 @@ import (
 	"archive/tar"
 	"bytes"
 	"compress/gzip"
+	"context"
 	"errors"
 	"fmt"
 	"io"
-	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 
 	"github.com/gofiber/fiber/v2"
+	"github.com/termux-nas/nas/internal/safehttp"
 )
 
 // --- 插件管理 API(用户通道,需登录;由 nasd 全权控制) ---
@@ -151,18 +152,15 @@ func (d *Daemon) pluginInstall(c *fiber.Ctx) error {
 }
 
 // installPluginFromURL 从 URL 下载插件包并安装(供市场/插件 API 复用)。
+// 安全:经 safehttp 下载(超时/大小上限/SSRF 私网拦截),下载前先校验插件名。
 func (d *Daemon) installPluginFromURL(name, source string) error {
-	resp, err := http.Get(source)
-	if err != nil {
-		return fmt.Errorf("下载失败: %w", err)
+	// 前置校验:无效名不发起任何网络请求
+	if !validPluginID(name) {
+		return &badRequestError{"插件名非法"}
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("下载失败: HTTP %s", resp.Status)
-	}
-	downloaded, err := io.ReadAll(resp.Body)
+	downloaded, err := safehttp.New().Download(context.Background(), source, 0)
 	if err != nil {
-		return fmt.Errorf("读取下载内容失败: %w", err)
+		return err
 	}
 	if len(downloaded) == 0 {
 		return fmt.Errorf("下载内容为空")

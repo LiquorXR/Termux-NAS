@@ -37,15 +37,30 @@ type Session struct {
 
 // Store 认证数据访问(users / sessions 表,迁移 v2)。
 type Store struct {
-	db       *sql.DB
-	log      *slog.Logger
-	limiter  *loginLimiter // 登录失败限流(M5 安全加固)
+	db      *sql.DB
+	log     *slog.Logger
+	limiter *loginLimiter // 登录失败限流(M5 安全加固)
+	secure  bool          // 会话 cookie 是否加 Secure 标记(HTTPS 反代部署)
 }
 
 // NewStore 创建认证存储。
 func NewStore(db *sql.DB, log *slog.Logger) *Store {
 	return &Store{db: db, log: log, limiter: newLoginLimiter()}
 }
+
+// SetTrustProxy 配置是否信任 X-Forwarded-For 头(仅反向代理部署时开启;
+// 默认直连部署信任 XFF 可被伪造绕过登录限流)。
+func (s *Store) SetTrustProxy(v bool) {
+	s.limiter.setTrustXFF(v)
+}
+
+// SetCookieSecure 配置会话 cookie 是否加 Secure 标记(HTTPS 反代部署)。
+func (s *Store) SetCookieSecure(v bool) {
+	s.secure = v
+}
+
+// Secure 返回会话 cookie 的 Secure 标记。
+func (s *Store) Secure() bool { return s.secure }
 
 // HasUsers 是否存在用户(决定 /setup 是否可用)。
 func (s *Store) HasUsers() (bool, error) {

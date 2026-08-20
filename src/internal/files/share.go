@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
@@ -57,7 +58,8 @@ func (s *Store) HandleShare(c *fiber.Ctx) error {
 	return c.JSON(fiber.Map{"ok": true, "url": "/s/" + token, "expires_at": now.Add(time.Duration(p.ExpiresHours) * time.Hour).Format(time.RFC3339)})
 }
 
-// HandleShareDownload GET /s/:token → 校验有效期并流式下载(内联)。
+// HandleShareDownload GET /s/:token → 校验有效期并流式下载。
+// 安全:一律 attachment 下载(内联渲染 html 等同源 XSS 风险,见 serveFile)。
 func (s *Store) HandleShareDownload(c *fiber.Ctx) error {
 	token := c.Params("token")
 	var relPath, expiresAt string
@@ -81,7 +83,7 @@ func (s *Store) HandleShareDownload(c *fiber.Ctx) error {
 	if _, err := os.Stat(full); err != nil {
 		return s.respondErr(c, err)
 	}
-	return s.serveFile(c, full, "", true)
+	return s.serveFile(c, full, filepath.Base(full), false)
 }
 
 // DeleteShare 删除分享(token 过期清理)。

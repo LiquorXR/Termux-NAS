@@ -39,6 +39,12 @@ func (d *Daemon) pluginProxy(c *fiber.Ctx) error {
 	// 更新活跃时间(空闲回收依据)
 	d.pm.Touch(id)
 
+	// 剥离敏感头:边缘已统一鉴权(RequireAuth),插件不应获取主会话
+	// cookie / 鉴权头(最小权限);否则插件可冒用 nasd 用户身份。
+	c.Request().Header.Del("Cookie")
+	c.Request().Header.Del(fiber.HeaderAuthorization)
+	c.Request().Header.Del("Proxy-Authorization")
+
 	// 拼接目标地址:保留子路径与查询参数
 	rest := strings.TrimPrefix(c.Params("*"), "/")
 	target := fmt.Sprintf("http://127.0.0.1:%d", info.Reg.Port)

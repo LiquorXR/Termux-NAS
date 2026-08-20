@@ -1,12 +1,12 @@
 package main
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"flag"
 	"fmt"
 	"io"
-	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -15,6 +15,7 @@ import (
 
 	"github.com/termux-nas/nas/internal/config"
 	"github.com/termux-nas/nas/internal/mgmt"
+	"github.com/termux-nas/nas/internal/safehttp"
 )
 
 // cmdUpdate 更新主框架 nasd(开发文档 §4.3):
@@ -108,29 +109,21 @@ func cmdUpdate(args []string) error {
 }
 
 // fetchUpdate 获取新版二进制:URL 下载或本地文件复制。
+// URL 下载走 safehttp(超时、128 MiB 上限、SSRF 私网拦截)。
 func fetchUpdate(source, dst string) error {
 	if source == "" {
 		return fmt.Errorf("缺少更新来源(URL 或本地文件路径)")
 	}
 	if strings.HasPrefix(source, "http://") || strings.HasPrefix(source, "https://") {
 		fmt.Println("下载更新包:", source)
-		resp, err := http.Get(source)
-		if err != nil {
-			return fmt.Errorf("下载失败: %w", err)
-		}
-		defer resp.Body.Close()
-		if resp.StatusCode != http.StatusOK {
-			return fmt.Errorf("下载失败: HTTP %d", resp.StatusCode)
-		}
-		f, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o755)
+		body, err := safehttp.New(safehttp.WithMaxBody(128<<20)).Download(context.Background(), source, 0)
 		if err != nil {
 			return err
 		}
-		if _, err := io.Copy(f, resp.Body); err != nil {
-			f.Close()
+		if err := os.WriteFile(dst, body, 0o755); err != nil {
 			return err
 		}
-		return f.Close()
+		return nil
 	}
 	// 本地文件
 	data, err := os.ReadFile(source)

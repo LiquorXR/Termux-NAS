@@ -92,18 +92,70 @@ func TestCronMatch(t *testing.T) {
 		at   time.Time
 		want bool
 	}{
-		{"* * * * *", base, true},                    // 每分钟
-		{"30 14 * * *", base, true},                  // 每天 14:30
-		{"0 14 * * *", base, false},                  // 14:00 不是 14:30
-		{"*/5 * * * *", base, true},                  // 每 5 分钟(30%5=0)
-		{"*/7 * * * *", base, false},                 // 30%7!=0
-		{"0,30 * * * *", base, true},                 // 0 分或 30 分
-		{"0-10 * * * *", base, false},                // 0-10 分
-		{"30 14 19 8 *", base, true},                 // 8 月 19 日 14:30
-		{"30 14 * * 3", time.Date(2026, 8, 19, 14, 30, 0, 0, time.Local), true}, // 周三
+		{"* * * * *", base, true},     // 每分钟
+		{"30 14 * * *", base, true},   // 每天 14:30
+		{"0 14 * * *", base, false},   // 14:00 不是 14:30
+		{"*/5 * * * *", base, true},   // 每 5 分钟(30%5=0)
+		{"*/7 * * * *", base, false},  // 30%7!=0
+		{"0,30 * * * *", base, true},  // 0 分或 30 分
+		{"0-10 * * * *", base, false}, // 0-10 分
+		{"30 14 19 8 *", base, true},  // 8 月 19 日 14:30
+		{"30 14 * * 3", time.Date(2026, 8, 19, 14, 30, 0, 0, time.Local), true},  // 周三
 		{"30 14 * * 2", time.Date(2026, 8, 19, 14, 30, 0, 0, time.Local), false}, // 周二不匹配
-		{"bad expr", base, false},                    // 非法
-		{"30 14 * * * extra", base, false},           // 字段数不对
+		{"bad expr", base, false},          // 非法
+		{"30 14 * * * extra", base, false}, // 字段数不对
+	}
+	for _, c := range cases {
+		if got := CronMatch(c.expr, c.at); got != c.want {
+			t.Errorf("CronMatch(%q, %v) = %v,期望 %v", c.expr, c.at.Format("2006-01-02 15:04"), got, c.want)
+		}
+	}
+}
+
+// TestCronMatchStep 步进语义边界:范围+步进、"N/step" 延伸到字段上限。
+func TestCronMatchStep(t *testing.T) {
+	base := time.Date(2026, 8, 19, 14, 30, 0, 0, time.Local)
+	cases := []struct {
+		expr string
+		at   time.Time
+		want bool
+	}{
+		{"1-5/2 * * * *", base, false},                                            // 30 不在 1-5
+		{"1-5/2 * * * *", time.Date(2026, 8, 19, 14, 3, 0, 0, time.Local), true},  // 3 ∈ {1,3,5}
+		{"1-5/2 * * * *", time.Date(2026, 8, 19, 14, 4, 0, 0, time.Local), false}, // 4 ∉ {1,3,5}
+		{"10/5 * * * *", time.Date(2026, 8, 19, 14, 30, 0, 0, time.Local), true},  // 30 = 10+4*5
+		{"10/5 * * * *", time.Date(2026, 8, 19, 14, 55, 0, 0, time.Local), true},  // 55 = 10+9*5(延伸到 59)
+		{"10/5 * * * *", time.Date(2026, 8, 19, 14, 56, 0, 0, time.Local), false}, // 56 超出步进序列
+		{"0-30/10 * * * *", time.Date(2026, 8, 19, 14, 30, 0, 0, time.Local), true},
+		{"0-30/10 * * * *", time.Date(2026, 8, 19, 14, 40, 0, 0, time.Local), false}, // 40 超出范围上界
+		{"*/15 * * * *", time.Date(2026, 8, 19, 14, 45, 0, 0, time.Local), true},
+		{"*/15 * * * *", time.Date(2026, 8, 19, 14, 50, 0, 0, time.Local), false},
+		{"* * * * */2", time.Date(2026, 8, 20, 14, 30, 0, 0, time.Local), true},  // 周四=4 ∈ {0,2,4,6}
+		{"* * * * */2", time.Date(2026, 8, 19, 14, 30, 0, 0, time.Local), false}, // 周三=3 ∉ {0,2,4,6}
+		{"0 14 * * 7", time.Date(2026, 8, 23, 14, 0, 0, 0, time.Local), true},    // 周日=7
+		{"bad/2 * * * *", base, false},
+		{"5/x * * * *", base, false},
+		{"1x * * * *", base, false},
+		{"-1 * * * *", base, false},
+	}
+	for _, c := range cases {
+		if got := CronMatch(c.expr, c.at); got != c.want {
+			t.Errorf("CronMatch(%q, %v) = %v,期望 %v", c.expr, c.at.Format("2006-01-02 15:04"), got, c.want)
+		}
+	}
+}
+
+// TestCronMatchHourField 小时字段边界("N/step" 延伸至 23)。
+func TestCronMatchHourField(t *testing.T) {
+	cases := []struct {
+		expr string
+		at   time.Time
+		want bool
+	}{
+		{"0 5/6 * * *", time.Date(2026, 8, 19, 5, 0, 0, 0, time.Local), true}, // 5,11,17,23
+		{"0 5/6 * * *", time.Date(2026, 8, 19, 23, 0, 0, 0, time.Local), true},
+		{"0 5/6 * * *", time.Date(2026, 8, 19, 12, 0, 0, 0, time.Local), false},
+		{"0 5/6 * * *", time.Date(2026, 8, 20, 5, 0, 0, 0, time.Local), true},
 	}
 	for _, c := range cases {
 		if got := CronMatch(c.expr, c.at); got != c.want {

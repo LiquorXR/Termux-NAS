@@ -148,6 +148,15 @@ fmt.Printf(`{"id":"download","name":"下载中心","version":"1.0.0",
 - 安全响应头:CSP / X-Frame-Options DENY / nosniff / no-referrer
 - 登录页/设置页 `Cache-Control: no-store`
 - 文件上传单文件上限 256 MiB
+- 分享链接下载强制 attachment(文件根内 html/svg/xml/js 不可同源内联渲染,防存储型 XSS)
+- 插件/更新包下载经安全 HTTP 客户端(超时 + 大小上限 + 私网/回环拦截,防 SSRF)
+- 会话 cookie:HttpOnly + SameSite=Lax + Max-Age(与 7 天 TTL 对齐)
+
+### 安全部署选项(`data/config.json`)
+| 配置项 | 说明 | 默认 |
+|--------|------|------|
+| `trust_proxy` | 部署在可信反向代理之后时开启,登录限流按 X-Forwarded-For 计数;直连开启可被伪造头绕过限流 | `false` |
+| `force_https` | 通过 HTTPS 反代/隧道访问时开启,会话 cookie 加 `Secure` 标记 | `false` |
 
 ## 关键设计决策
 

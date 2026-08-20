@@ -20,17 +20,17 @@ import (
 
 // Job 一个备份任务(与 DB 行对应)。
 type Job struct {
-	ID          int64     `json:"id"`
-	Name        string    `json:"name"`
-	Source      string    `json:"source"`   // 备份源目录
-	Target      string    `json:"target"`   // 备份目标目录(可含远程 rsync:// 前缀)
-	Schedule    string    `json:"schedule"` // cron 表达式(5 字段)或空(仅手动)
-	Enabled     bool      `json:"enabled"`
-	KeepCopies  int       `json:"keep_copies"` // 保留最近 N 份(0=不限制)
-	LastRun     time.Time `json:"last_run,omitempty"`
-	LastStatus  string    `json:"last_status"` // ok / error / running
-	LastError   string    `json:"last_error,omitempty"`
-	LastSize    int64     `json:"last_size,omitempty"`
+	ID         int64     `json:"id"`
+	Name       string    `json:"name"`
+	Source     string    `json:"source"`   // 备份源目录
+	Target     string    `json:"target"`   // 备份目标目录(可含远程 rsync:// 前缀)
+	Schedule   string    `json:"schedule"` // cron 表达式(5 字段)或空(仅手动)
+	Enabled    bool      `json:"enabled"`
+	KeepCopies int       `json:"keep_copies"` // 保留最近 N 份(0=不限制)
+	LastRun    time.Time `json:"last_run,omitempty"`
+	LastStatus string    `json:"last_status"` // ok / error / running
+	LastError  string    `json:"last_error,omitempty"`
+	LastSize   int64     `json:"last_size,omitempty"`
 }
 
 // Status 任务执行状态。
@@ -398,16 +398,17 @@ func CronMatch(expr string, t time.Time) bool {
 	if len(fields) != 5 {
 		return false
 	}
-	if !cronFieldMatch(fields[0], t.Minute()) {
+	// 各字段取值范围(分 0-59,时 0-23,日 1-31,月 1-12,周 0-7)
+	if !cronFieldMatch(fields[0], t.Minute(), 59) {
 		return false
 	}
-	if !cronFieldMatch(fields[1], t.Hour()) {
+	if !cronFieldMatch(fields[1], t.Hour(), 23) {
 		return false
 	}
-	if !cronFieldMatch(fields[2], t.Day()) {
+	if !cronFieldMatch(fields[2], t.Day(), 31) {
 		return false
 	}
-	if !cronFieldMatch(fields[3], int(t.Month())) {
+	if !cronFieldMatch(fields[3], int(t.Month()), 12) {
 		return false
 	}
 	// 周:0/7=周日,1-6=周一至周六
@@ -415,70 +416,90 @@ func CronMatch(expr string, t time.Time) bool {
 	if wd == 0 {
 		wd = 7
 	}
-	return cronFieldMatch(fields[4], wd)
+	return cronFieldMatch(fields[4], wd, 7)
 }
 
 // cronFieldMatch 匹配单个字段(支持 *、数字、- 范围、, 列表、/ 步进)。
-func cronFieldMatch(field string, val int) bool {
+func cronFieldMatch(field string, val, max int) bool {
 	if field == "*" {
 		return true
 	}
 	for _, part := range strings.Split(field, ",") {
-		if matchCronPart(part, val) {
+		if matchCronPart(part, val, max) {
 			return true
 		}
 	}
 	return false
 }
 
-func matchCronPart(part string, val int) bool {
-	if strings.Contains(part, "/") {
-		base, stepStr, ok := strings.Cut(part, "/")
-		if !ok {
-			return false
-		}
-		var step int
-		fmt.Sscanf(stepStr, "%d", &step)
+// matchCronPart 匹配一个列表项。语义:
+//   - "N" / "N-M":精确值 / 闭区间
+//   - "*/S" / "N/S" / "N-M/S":从起点步进 S,上界为该字段最大值
+//     (标准 cron 语义:"10/5" 表示 10,15,...,55)
+func matchCronPart(part string, val, max int) bool {
+	if stepStr, ok := strings.CutPrefix(part, "*/"); ok {
+		step := atoi(stepStr)
 		if step <= 0 {
 			return false
 		}
-		lo, hi := 0, maxFieldVal(base)
+		return val%step == 0
+	}
+	if base, stepStr, ok := strings.Cut(part, "/"); ok {
+		step := atoi(stepStr)
+		if step <= 0 {
+			return false
+		}
+		lo, hi := 0, max
 		if base != "*" && base != "" {
-			lo = hi
-			fmt.Sscanf(base, "%d", &lo)
+			lo = cronRangeLo(base)
+			hi = cronRangeHi(base, max)
 		}
 		if val < lo || val > hi {
 			return false
 		}
 		return (val-lo)%step == 0
 	}
-	if strings.Contains(part, "-") {
-		loStr, hiStr, _ := strings.Cut(part, "-")
-		var lo, hi int
-		fmt.Sscanf(loStr, "%d", &lo)
-		fmt.Sscanf(hiStr, "%d", &hi)
+	if loStr, hiStr, ok := strings.Cut(part, "-"); ok {
+		lo, hi := atoi(loStr), atoi(hiStr)
+		if lo < 0 || hi < 0 {
+			return false
+		}
 		return val >= lo && val <= hi
 	}
-	var n int
-	if _, err := fmt.Sscanf(part, "%d", &n); err == nil {
-		return val == n
-	}
-	return false
+	return val == atoi(part)
 }
 
-// maxFieldVal cron 字段的最大值(默认 59,仅用于步进范围上界)。
-func maxFieldVal(field string) int {
-	if field == "*" {
-		return 59
+// cronRangeLo 范围下限:"1-5" → 1,"7" → 7;非法返回 -1。
+func cronRangeLo(base string) int {
+	if loStr, _, ok := strings.Cut(base, "-"); ok {
+		return atoi(loStr)
 	}
-	if strings.Contains(field, "-") {
-		_, hiStr, _ := strings.Cut(field, "-")
-		var hi int
-		fmt.Sscanf(hiStr, "%d", &hi)
-		return hi
+	return atoi(base)
+}
+
+// cronRangeHi 范围上限:"1-5" → 5;单数字按字段最大值(步进语义)。
+func cronRangeHi(base string, max int) int {
+	if _, hiStr, ok := strings.Cut(base, "-"); ok {
+		return atoi(hiStr)
 	}
-	var n int
-	fmt.Sscanf(field, "%d", &n)
+	return max
+}
+
+// atoi 严格解析非负整数;失败返回 -1(非法输入永不匹配)。
+func atoi(s string) int {
+	if s == "" {
+		return -1
+	}
+	n := 0
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return -1
+		}
+		n = n*10 + int(r-'0')
+		if n > 1<<30 {
+			return -1
+		}
+	}
 	return n
 }
 

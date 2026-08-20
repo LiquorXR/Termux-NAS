@@ -18,9 +18,9 @@ func TestSecurityHeaders(t *testing.T) {
 		t.Fatal(err)
 	}
 	checks := map[string]string{
-		"X-Content-Type-Options": "nosniff",
-		"X-Frame-Options":        "DENY",
-		"Referrer-Policy":        "no-referrer",
+		"X-Content-Type-Options":  "nosniff",
+		"X-Frame-Options":         "DENY",
+		"Referrer-Policy":         "no-referrer",
 		"Content-Security-Policy": "default-src 'self'",
 	}
 	for h, prefix := range checks {

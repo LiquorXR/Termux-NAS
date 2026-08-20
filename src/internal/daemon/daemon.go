@@ -12,7 +12,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"net"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -35,16 +34,15 @@ type Daemon struct {
 	paths config.Paths
 	log   *slog.Logger
 
-	start time.Time
-	db    *sql.DB
-	auth  *auth.Store
-	files *files.Store
-	app   *fiber.App
-	pm    *Manager          // 插件管理器(M4)
-	svc   *svc.Controller   // 服务控制(M5)
+	start   time.Time
+	db      *sql.DB
+	auth    *auth.Store
+	files   *files.Store
+	app     *fiber.App
+	pm      *Manager        // 插件管理器(M4)
+	svc     *svc.Controller // 服务控制(M5)
 	backups *backup.Manager // 备份中心(M5)
 
-	mgmtLn  net.Listener
 	mgmtSrv *mgmt.Server
 	logFile io.WriteCloser
 
@@ -81,6 +79,9 @@ func (d *Daemon) Run(ctx context.Context) error {
 
 	// 1.5) 认证存储(M2 认证中心)
 	d.auth = auth.NewStore(d.db, d.log)
+	// 安全部署选项(仅反向代理/HTTPS 场景开启,见 config.Config 注释)
+	d.auth.SetTrustProxy(d.cfg.TrustProxy)
+	d.auth.SetCookieSecure(d.cfg.ForceHTTPS)
 
 	// 1.6) 文件管理(M3):根目录可用 config.file_root 覆盖(默认 <root>/files)
 	fileRoot := d.paths.FilesDir

@@ -91,3 +91,21 @@ func TestRel(t *testing.T) {
 		t.Errorf("Rel(root) = %q, 期望空串", got)
 	}
 }
+
+// TestIsInlineUnsafe 存储型 XSS 回归:可执行内容类型禁止内联。
+func TestIsInlineUnsafe(t *testing.T) {
+	unsafe := []string{"text/html", "text/html; charset=utf-8", "image/svg+xml",
+		"text/xml", "application/xml", "application/javascript", "text/javascript", "application/json"}
+	safe := []string{"text/plain", "application/octet-stream", "image/png",
+		"application/pdf", "text/markdown", "application/zip", "video/mp4"}
+	for _, ct := range unsafe {
+		if !isInlineUnsafe(ct) {
+			t.Errorf("isInlineUnsafe(%q): 应判为不可内联", ct)
+		}
+	}
+	for _, ct := range safe {
+		if isInlineUnsafe(ct) {
+			t.Errorf("isInlineUnsafe(%q): 不应判为不可内联", ct)
+		}
+	}
+}

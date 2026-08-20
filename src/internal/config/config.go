@@ -37,6 +37,12 @@ type Config struct {
 	FileRoot string `json:"file_root,omitempty"`
 	// PluginIdleTimeout 插件懒加载空闲回收秒数(M4 使用,预留)。
 	PluginIdleTimeout int `json:"plugin_idle_timeout,omitempty"`
+	// TrustProxy 信任 X-Forwarded-For 头(仅当 nasd 部署在可信反向代理之后;
+	// 直连部署开启会被伪造头绕过登录限流)。
+	TrustProxy bool `json:"trust_proxy,omitempty"`
+	// ForceHTTPS 强制 HTTPS 语义:会话 cookie 加 Secure 标记。
+	// 仅当通过 HTTPS 反向代理/隧道访问时开启,否则登录后将无法下发 cookie。
+	ForceHTTPS bool `json:"force_https,omitempty"`
 	// CreatedAt 配置首次生成时间。
 	CreatedAt string `json:"created_at,omitempty"`
 }

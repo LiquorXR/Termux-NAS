@@ -13,7 +13,6 @@ func (d *Daemon) startMgmt() error {
 	if err != nil {
 		return fmt.Errorf("监听管理通道: %w", err)
 	}
-	d.mgmtLn = ln
 	d.mgmtSrv = mgmt.NewServer(ln, d, d.cfg.ManageToken, d.log)
 	go d.mgmtSrv.Serve()
 	d.log.Info("管理通道就绪", "sock", mgmt.SocketFile(d.paths.SockPath))
