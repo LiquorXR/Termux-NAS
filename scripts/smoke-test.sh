@@ -127,6 +127,7 @@ if [ "$IS_LINUX" = "1" ]; then
     done
     return 1
   }
+  nasd_lock_pid() { head -n1 "$NAS_ROOT/run/nas.lock" 2>/dev/null || true; }
 
   step "运行时: start → status → log → health → restart → stop"
   export NAS_DIST_URL="$DIST_URL_FILE" NAS_ROOT="$SMOKE/nas"
@@ -138,16 +139,28 @@ if [ "$IS_LINUX" = "1" ]; then
   bash "$ROOT/nas.sh" log -n 5 || { bad "log 失败"; exit 1; }
   curl -sf -o /dev/null "http://127.0.0.1:7531/health" || { bad "health 探活失败"; exit 1; }
   ok "start/status/log/health 正常"
+  # restart:后台运行;旧实例在停止前仍提供健康,须等 nasd PID 变化才算重启完成
+  old_pid="$(nasd_lock_pid)"
   nohup bash "$ROOT/nas.sh" restart >/dev/null 2>&1 &
+  for i in $(seq 1 60); do
+    new_pid="$(nasd_lock_pid)"
+    if [ -n "$new_pid" ] && [ "$new_pid" != "$old_pid" ]; then break; fi
+    sleep 0.5
+  done
   wait_nasd_up || { bad "restart 后 health 未就绪"; exit 1; }
   bash "$ROOT/nas.sh" status >/dev/null || { bad "restart 后 status 失败"; exit 1; }
   ok "restart 正常"
 
   step "运行时: 运行中 update -f(优雅停止→替换→重启)"
   nohup bash "$ROOT/nas.sh" update -f >/dev/null 2>&1 &
+  # 旧实例在下载/校验阶段仍提供健康,不能只看 health;以 .bak 出现作为替换完成信号
+  for i in $(seq 1 60); do
+    [ -f "$NAS_ROOT/bin/nasd.bak" ] && break
+    sleep 0.5
+  done
+  [ -f "$NAS_ROOT/bin/nasd.bak" ] || { bad "运行中更新未留下 .bak"; exit 1; }
   wait_nasd_up || { bad "更新后 health 未就绪"; exit 1; }
   bash "$ROOT/nas.sh" status >/dev/null || { bad "更新后状态异常"; exit 1; }
-  [ -f "$NAS_ROOT/bin/nasd.bak" ] || { bad "运行中更新未留下 .bak"; exit 1; }
   ok "运行中更新正常(停止+替换+重启,保留 .bak)"
 
   bash "$ROOT/nas.sh" stop || { bad "stop 失败"; exit 1; }
