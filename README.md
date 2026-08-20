@@ -211,5 +211,11 @@ fmt.Printf(`{"id":"download","name":"下载中心","version":"1.0.0",
 
 ## 文档
 
-- `docs/NAS框架开发文档.md` — 架构 / API / 安全 / 里程碑(唯一正式文档)
-- 产品选型调研(`场景调研.md`、`技术栈建议.md`)为早期草稿,未随仓库维护,已不收录
+| 文档 | 语言 | 内容 |
+|---|---|---|
+| [完整项目文档(中文)](docs/PROJECT_GUIDE.zh-CN.md) | 中文 | 完整参考:架构、模块、API、配置、安全、部署、FAQ |
+| [Complete Project Documentation (English)](docs/PROJECT_GUIDE.en-US.md) | English | Full reference: architecture, modules, API, config, security, deployment, FAQ |
+| [README(English)](README.en.md) | English | English quick start & overview |
+| [NAS 框架开发文档](docs/NAS框架开发文档.md) | 中文 | 正式开发文档:架构 / API / 安全 / 里程碑 |
+
+> 产品选型调研(`场景调研.md`、`技术栈建议.md`)为早期草稿,未随仓库维护,已不收录。

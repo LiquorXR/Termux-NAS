@@ -5,6 +5,11 @@
 > 架构:**主框架(nasd,单一二进制,内建 NAS 必要功能)+ 一键管理脚本(nas.sh)+ 插件扩展(独立二进制)**
 > 技术栈:Go + Fiber + SQLite + 前端 Vite 工程化(HTMX + 原生 JS + 手写设计系统)
 > 部署环境:Termux(Android 上的 Linux 环境),单进程 + 可选插件进程
+>
+> 📚 配套文档:
+> - 用户向快速开始 → 仓库根 `README.md` / `README.en.md`
+> - 完整项目文档(中文)[docs/PROJECT_GUIDE.zh-CN.md](PROJECT_GUIDE.zh-CN.md)
+> - Complete Project Documentation (English) [docs/PROJECT_GUIDE.en-US.md](PROJECT_GUIDE.en-US.md)
 
 ---
 
