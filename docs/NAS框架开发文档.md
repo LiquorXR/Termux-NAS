@@ -68,7 +68,7 @@
 | 组件 | 形态 | 职责 | 常驻 |
 |------|------|------|------|
 | **nas.sh** | bash 脚本(仓库根) | 主框架全生命周期:安装/更新/启停/状态/日志/卸载 | 否(用完即走) |
-| **nasd** | 守护进程二进制 | 运行时全部能力:HTTP 服务、内建 NAS 功能、**插件全权管理** | 是(nas.sh nohup 后台) |
+| **nasd** | 守护进程二进制 | 运行时全部能力:HTTP 服务、内建 NAS 功能、**插件全权管理** | 是(nas.sh 常驻监督) |
 | **插件** | 独立二进制 | 扩展功能:下载/云盘/媒体等;生命周期完全由 nasd 控制 | 按需(懒加载) |
 
 > **职责单点原则**:插件的安装、卸载、启停、更新**只能**通过 nasd(Web UI 的「插件管理」页或用户通道 API)操作,nas.sh 不感知插件存在。nas.sh 与插件之间不存在任何直接交互。
@@ -158,7 +158,7 @@ bash nas.sh self-update          # 更新 nas.sh 自身
 ### 5.1 进程生命周期
 
 ```
-启动:bash nas.sh start(nohup 后台,stderr 落盘 data/logs/nasd.stderr.log)
+启动:bash nas.sh start(自动分离常驻监督进程,保持 nasd 父进程存活,防孤儿被回收)
 运行:nasd 启动(flock 单实例锁)→ 加载配置 → 打开 SQLite → 扫描插件(登记,不启动)
      → 启动 HTTP :7531(/health 供探活)
 停止:SIGTERM → 逐个停止插件 → 关闭 HTTP(超时)→ 释放单实例锁 → 退出
@@ -406,7 +406,7 @@ pkg install golang termux-api
 cd ~/nas/src && CGO_ENABLED=0 go build -ldflags="-s -w" -o ../bin/nasd ./cmd/nasd
 
 # 启动
-bash ../nas.sh start            # nohup 后台
+bash ../nas.sh start            # 后台启动(监督进程托管)
 
 # 权限与保活
 # - 电池设置:Termux 加入"不限制后台"
@@ -425,6 +425,6 @@ bash ../nas.sh start            # nohup 后台
 | 核心功能归属 | 内建在 nasd | 低内存、单进程、Termux 友好、部署简单 |
 | 管理方式 | 单一脚本 nas.sh(SIGTERM/health/日志直读) | 无需额外 Go 管理二进制;零编程能力即可运维 |
 | **职责单点** | **nas.sh 只管理主框架生命周期;插件全权由 nasd 控制(Web UI)** | 单一管理入口,避免两套命令/两处状态,操作一致性好 |
-| 进程守护 | 单实例锁(flock)+ nas.sh nohup 后台(nasd 日志自带落盘) | 防双实例竞态;崩溃后由 nas.sh start 重新拉起 |
+| 进程守护 | 单实例锁(flock)+ nas.sh 常驻监督进程(启动时自我分离) | 防双实例竞态;监督进程保持 nasd 父进程存活——Android/国产 ROM 会秒级 SIGKILL 孤儿进程(PPID=1),详见 GUIDE FAQ |
 | 插件内存策略 | 懒加载 + 空闲回收 | 常驻内存不随插件数量增长 |
 | 通信协议 | 用户通道 HTTP :7531(唯一对外) | 无本地管理 socket,精简暴露面 |

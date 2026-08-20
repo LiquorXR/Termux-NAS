@@ -61,7 +61,7 @@ pkg install curl                # 首次:补齐依赖
 # 国内网络建议经 ghfast.top 镜像下载脚本(nas.sh 内置下载同样默认走此镜像)
 curl -fsSL https://ghfast.top/https://raw.githubusercontent.com/LiquorXR/Termux-NAS/main/nas.sh -o nas.sh
 bash nas.sh install             # 安装
-bash nas.sh start               # 后台启动 nasd(nohup,stderr 落盘 data/logs/nasd.stderr.log)
+bash nas.sh start               # 后台启动 nasd(自动分离监督进程托管,防孤儿被系统回收)
 ```
 
 > `nas.sh` 下载/更新主程序默认经 **ghfast.top 镜像**加速(`NAS_MIRROR`,
@@ -98,7 +98,7 @@ bash nas.sh start               # 后台启动 nasd(nohup,stderr 落盘 data/log
 ```bash
 cd ~/nas/src && make android        # 交叉编译 android/arm64 静态二进制(含前端)
 # 产物在 ../bin/nasd,再用 nas.sh 后续流程管理即可
-bash ../nas.sh start                # 后台启动 nasd(nohup)
+bash ../nas.sh start                # 后台启动 nasd(监督进程托管)
 ```
 
 ## 通信与生命周期管理

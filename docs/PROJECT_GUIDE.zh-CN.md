@@ -97,7 +97,7 @@
 | 组件 | 形态 | 职责 | 常驻 |
 |---|---|---|---|
 | **nas.sh** | bash 脚本(仓库根) | 主框架全生命周期:安装/更新/启停/状态/日志/卸载 | 否(用完即走) |
-| **nasd** | 守护进程二进制 | 运行时全部能力:HTTP 服务、内建 NAS 功能、**插件全权管理** | 是(nas.sh nohup 后台) |
+| **nasd** | 守护进程二进制 | 运行时全部能力:HTTP 服务、内建 NAS 功能、**插件全权管理** | 是(nas.sh 常驻监督) |
 | **插件** | 独立二进制 | 扩展功能:下载/云盘/媒体等;生命周期完全由 nasd 控制 | 按需(懒加载) |
 
 > **职责单点原则**:插件的安装、卸载、启停、更新**只能**通过 nasd(Web UI「插件管理」页或用户通道 API)操作,nas.sh 不感知插件存在。nas.sh 与插件之间不存在任何直接交互。
@@ -243,7 +243,7 @@ SHA256 校验 → chmod +x → 落盘。
 ```bash
 pkg install golang
 cd ~/nas/src && make android    # CGO_ENABLED=0 GOOS=android GOARCH=arm64,内嵌前端
-bash ../nas.sh start            # 后台启动 nasd(nohup)
+bash ../nas.sh start            # 后台启动 nasd(监督进程托管)
 ```
 
 ---
@@ -664,7 +664,7 @@ GET|POST|PUT|DELETE /p/<id>[/...]  → 插件反向代理(统一鉴权,剥离敏
 | 核心功能归属 | 内建在 nasd | 低内存、单进程、Termux 友好、部署简单 |
 | 管理方式 | 单一脚本 nas.sh(SIGTERM/health/日志直读) | 无需额外 Go 管理二进制;零编程能力即可运维 |
 | 职责单点 | nas.sh 只管理主框架生命周期;插件全权由 nasd 控制(Web UI) | 单一管理入口,避免两套命令/两处状态 |
-| 进程守护 | flock 单实例锁 + nas.sh nohup 后台(nasd 日志自带落盘) | 防双实例竞态;崩溃后由 nas.sh start 重新拉起 |
+| 进程守护 | flock 单实例锁 + nas.sh 常驻监督进程(启动时自我分离) | 防双实例竞态;监督进程保持 nasd 父进程存活——系统会秒级 SIGKILL 父进程已退出的孤儿进程(Android/国产 ROM 实测,详见 FAQ) |
 | 插件内存策略 | 懒加载 + 空闲回收 | 常驻内存不随插件数量增长 |
 | 通信协议 | 用户通道 HTTP :7531(唯一对外) | 无本地管理 socket,精简暴露面 |
 | SQLite 驱动 | modernc.org/sqlite(纯 Go) | `CGO_ENABLED=0` 静态编译,Termux 无 C 链也能构建 |
@@ -706,6 +706,14 @@ A: 触发了每 IP 5 次/15 分钟限流,等待解锁即可。若在反向代理
 
 **Q: 插件显示 `crash-loop`。**
 A: 到「插件」页查看 last_err/日志,修复后先 Stop(复位)再 Start。
+
+**Q: `nas.sh start` 后 nasd 秒级消失(无声无日志),手动 `nohup` 却一直正常。**
+A: 这是系统对**孤儿进程**的回收:Android/部分国产 ROM 会 SIGKILL「父进程已退出(PPID=1)」的
+进程(同 uid 进程即可发信号,无需 root;nasd 被 SIGKILL 时来不及写任何日志,所以表现为"静默退出")。
+手动 `nohup ... &` 之所以存活,是因为交互 shell 一直作为父进程存在。`nas.sh start` 已内置对策:
+在交互终端(Linux/Termux)下自动用 `NAS_SUPERVISOR=1 nohup bash nas.sh start` 分离出一个
+**常驻监督进程**,由它作为 nasd 的父进程并保持存活(nasd 退出后监督进程自动退出);
+无 tty 环境(CI)走原同步启动路径。验证方式:划掉 Termux 任务/关闭 SSH 后 `bash nas.sh status` 仍应显示运行中。
 
 **Q: 想更新又保留旧版本。**
 A: `nas.sh update` 会保留最近一份 `bin/nasd.bak`,需要时手动换回并重启。

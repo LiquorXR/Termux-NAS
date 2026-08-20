@@ -100,7 +100,7 @@ Build a **pluggable mobile NAS** inside Termux:
 | Component | Form | Responsibility | Resident |
 |---|---|---|---|
 | **nas.sh** | bash script (repo root) | full lifecycle of the main frame: install/update/start-stop/status/log/uninstall | no (run-and-exit) |
-| **nasd** | daemon binary | all runtime capabilities: HTTP service, built-in NAS features, **full plugin management** | yes (background via nas.sh nohup) |
+| **nasd** | daemon binary | all runtime capabilities: HTTP service, built-in NAS features, **full plugin management** | yes (nas.sh resident supervisor) |
 | **Plugins** | independent binaries | extended features: download / cloud drive / media ...; lifecycle fully controlled by nasd | on demand (lazy load) |
 
 > **Single responsibility**: installing, uninstalling, starting/stopping and updating plugins can **only** be done
@@ -249,7 +249,7 @@ Browse to `http://<phone-lan-ip>:7531`, follow the wizard to create the admin ac
 ```bash
 pkg install golang
 cd ~/nas/src && make android    # CGO_ENABLED=0 GOOS=android GOARCH=arm64, front end embedded
-bash ../nas.sh start            # start nasd in the background (nohup)
+bash ../nas.sh start            # start nasd in the background (supervised)
 ```
 
 ---
@@ -689,7 +689,7 @@ Manual release: `git tag v0.1.0 && git push origin v0.1.0`.
 | Core features | built into nasd | low memory, single process, Termux-friendly, simple deployment |
 | Management | single script nas.sh (SIGTERM / health / direct logs) | no extra Go admin binary; zero-programming ops |
 | Responsibility ownership | nas.sh manages only the main frame; nasd fully owns plugins (Web UI) | one management entry point, consistent operations, no dual state |
-| Process supervision | flock single-instance lock + background via nas.sh nohup (nasd logs to disk) | prevents dual-instance races; restart with `nas.sh start` after a crash |
+| Process supervision | flock single-instance lock + nas.sh resident supervisor (self-detached at start) | prevents dual-instance races; the supervisor keeps nasd's parent alive — the system SIGKILLs orphaned (PPID=1) processes within seconds (Android/CN-ROM observed, see FAQ) |
 | Plugin memory | lazy load + idle reap | resident memory doesn't grow with plugin count |
 | Communication | user-channel HTTP :7531 (only exposure) | no local admin socket, minimal attack surface |
 | SQLite driver | modernc.org/sqlite (pure Go) | `CGO_ENABLED=0` static builds work without a C toolchain on Termux |
@@ -736,6 +736,15 @@ A: Check its log/`last_err` in the Plugins page, fix the plugin, then press Stop
 
 **Q: I want to update and keep the old version.**
 A: `nas.sh update` keeps the most recent `bin/nasd.bak`; roll it back manually (replace `bin/nasd`, restart).
+
+**Q: `nas.sh start` reports success but nasd disappears within seconds (no log), while a manual `nohup` keeps running.**
+A: This is the system reclaiming **orphan processes**: Android / many CN ROMs SIGKILL any process whose
+parent has exited (PPID=1). A same-UID process can signal it without root; nasd is SIGKILLed before it can
+write a log, so it looks like a silent exit. A manual `nohup ... &` survives only because the interactive shell
+stays alive as its parent. `nas.sh start` now handles this: on an interactive terminal (Linux/Termux) it detaches a
+**resident supervisor** (`NAS_SUPERVISOR=1 nohup bash nas.sh start`) that stays alive as nasd's parent and exits
+by itself once nasd stops; in no-tty environments (CI) it keeps the old synchronous start. Verify by swiping away
+Termux / closing the SSH session, then `bash nas.sh status` should still show running.
 
 **Q: Where is my data?**
 A: Everything is under `~/nas/`: `data/nas.db` (sessions/shares/backup jobs), `data/config.json`, `files/`.

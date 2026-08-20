@@ -67,7 +67,7 @@ pkg install curl                # first time: install the dependency
 # For networks in mainland China the ghfast.top mirror is recommended (nas.sh uses it by default too)
 curl -fsSL https://ghfast.top/https://raw.githubusercontent.com/LiquorXR/Termux-NAS/main/nas.sh -o nas.sh
 bash nas.sh install             # install
-bash nas.sh start               # start nasd in the background (nohup; stderr logged to data/logs/nasd.stderr.log)
+bash nas.sh start               # start nasd in the background (detached supervisor keeps the parent alive, prevents orphan reclamation)
 ```
 
 > `nas.sh` downloads/updates the main program through the **ghfast.top mirror** by default
@@ -105,7 +105,7 @@ If you need to build it yourself (no network or custom build), first install the
 pkg install golang
 cd ~/nas/src && make android        # cross-compile the android/arm64 static binary (front end included)
 # artifact lands in ../bin/nasd; manage it with nas.sh from there on
-bash ../nas.sh start                # start nasd in the background (nohup)
+bash ../nas.sh start                # start nasd in the background (supervised)
 ```
 
 ## Communication & Lifecycle Management
