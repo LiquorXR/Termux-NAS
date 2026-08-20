@@ -4,7 +4,7 @@ A **pluggable mobile NAS** that runs inside Termux (the Linux environment on And
 
 - **Architecture**: a single main-frame daemon `nasd` (one binary) + plugins (independent binaries); the repo-root script `nas.sh` manages the full lifecycle of `nasd` (install / update / start / stop / status / log / uninstall)
 - **Tech stack**: Go + Fiber + SQLite (WAL) + HTMX + vanilla JS/CSS (built with Vite)
-- **Deployment environment**: Termux — no root, high ports, termux-services supervision; the one-liner `nas.sh` installs/updates/starts/stops it, **no Go toolchain needed on the phone**
+- **Deployment environment**: Termux — no root, high ports, `nohup` background daemon; the one-liner `nas.sh` installs/updates/starts/stops it, **no Go toolchain needed on the phone**
 - **Current stage**: M3 file management + system monitoring onward is complete; all milestones **M1–M6** are done (see [Milestones](#milestones))
 
 ## Documentation
@@ -29,8 +29,7 @@ A **pluggable mobile NAS** that runs inside Termux (the Linux environment on And
 │   │   ├── version/            # version info (injected at build time)
 │   │   └── webui/              # embedded front-end static assets (single binary)
 │   ├── scripts/build.sh        # build script (host / android cross-compile)
-│   ├── scripts/smoke-test.sh   # nas.sh smoke tests (mechanism layer everywhere, runtime layer needs Linux)
-│   ├── termux-service/         # runit service script template
+│   ├── scripts/smoke-test.sh   # nas.sh smoke tests (mechanism layer cross-platform / runtime layer needs Linux)
 │   └── Makefile
 ├── .github/workflows/          # CI (ci.yml) + release pipeline (release.yml)
 ├── bin/                        # build artifacts, or the binary downloaded by nas.sh (nasd)
@@ -61,14 +60,14 @@ bash ../nas.sh stop
 
 No Go toolchain and no manual file copying is required on the phone. `nas.sh` automatically:
 creates the `~/nas` layout → pulls the prebuilt `android/arm64` binary from GitHub Releases →
-SHA256 verification → sets the executable bit → installs (optionally registering runit auto-start).
+SHA256 verification → sets the executable bit → installs.
 
 ```bash
 pkg install curl                # first time: install the dependency
 # For networks in mainland China the ghfast.top mirror is recommended (nas.sh uses it by default too)
 curl -fsSL https://ghfast.top/https://raw.githubusercontent.com/LiquorXR/Termux-NAS/main/nas.sh -o nas.sh
-bash nas.sh install --service   # install + register boot auto-start (termux-services)
-bash nas.sh start               # start nasd
+bash nas.sh install             # install
+bash nas.sh start               # start nasd in the background (nohup; stderr logged to data/logs/nasd.stderr.log)
 ```
 
 > `nas.sh` downloads/updates the main program through the **ghfast.top mirror** by default
@@ -84,7 +83,7 @@ Open `http://<phone LAN IP>:7531` in a browser.
 
 | Command | Purpose |
 |---|---|
-| `bash nas.sh install [--service]` | install / repair (optionally register boot auto-start) |
+| `bash nas.sh install` | install / repair |
 | `bash nas.sh update [-f] [version]` | update to latest (or a specific `v<version>`), with verify / backup / rollback |
 | `bash nas.sh start` / `stop` / `restart` | start / graceful stop / restart |
 | `bash nas.sh status` / `log [-n N]` | status / view log tail |
@@ -106,11 +105,7 @@ If you need to build it yourself (no network or custom build), first install the
 pkg install golang
 cd ~/nas/src && make android        # cross-compile the android/arm64 static binary (front end included)
 # artifact lands in ../bin/nasd; manage it with nas.sh from there on
-mkdir -p $PREFIX/var/service/nasd/log
-cp termux-service/nasd-run.sh $PREFIX/var/service/nasd/run
-chmod +x $PREFIX/var/service/nasd/run
-sv-enable nasd                      # boot auto-start (Termux:Boot)
-sv start nasd                       # or: bash nas.sh start
+bash ../nas.sh start                # start nasd in the background (nohup)
 ```
 
 ## Communication & Lifecycle Management
@@ -132,7 +127,7 @@ All plugin operations go over the user-channel HTTP (the Web UI's "Plugins" page
 | **M2** | Auth center + front-end shell (login page / layout / HTMX) + SQLite sessions | ✅ |
 | **M3** | Built-in modules: file management + system monitoring (HTMX polling dashboard) | ✅ |
 | **M4** | Plugin system: manager API + registration protocol + reverse proxy + lazy loading + download plugin | ✅ |
-| **M5** | Service control + backup center + security hardening | ✅ |
+| **M5** | Backup center + security hardening | ✅ |
 | **M6** | Atomic update flow + plugin market + PWA + Tailscale integration | ✅ |
 
 ## M6: Atomic Updates + Plugin Market + PWA (implemented)
@@ -182,14 +177,7 @@ fmt.Printf(`{"id":"download","name":"Download Center","version":"1.0.0",
 - Provide `GET /health` returning 200 (for probing)
 - Package as `.tar.gz` (one executable inside), upload it from the Web UI "Plugins" page
 
-## M5: Service Control + Backup Center + Security Hardening (implemented)
-
-### Service control
-- `internal/svc`: start / stop / restart / auto-start of services based on termux-services (runit),
-  parses `sv status` output
-- Built-in service list: sshd / samba / nginx / aria2 / cron / mysql
-- Platform adaptation: real execution on Termux/Linux; automatic simulation on Windows dev (MockRunner)
-- API: `/api/svc/list|start|stop|restart|autostart`; Web UI "Services" page (5 s polling)
+## M5: Backup Center + Security Hardening (implemented)
 
 ### Backup center
 - `internal/backup`: task CRUD (SQLite persistence) + cron scheduling + executor + completion notifications

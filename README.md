@@ -5,7 +5,7 @@
 - **架构**:单一主框架守护进程 `nasd` + 插件(独立二进制);仓库根脚本 `nas.sh`
   全周期管理 nasd 的生命周期(安装/更新/启停/状态/日志/卸载)
 - **技术栈**:Go + Fiber + SQLite(WAL)+ HTMX + 原生 JS/CSS(Vite 构建)
-- **部署环境**:Termux,无 root、高位端口、termux-services 守护;**一键脚本 `nas.sh`
+- **部署环境**:Termux,无 root、高位端口、`nohup` 后台守护;**一键脚本 `nas.sh`
   安装/更新/启停,无需手机安装 Go**
 - **当前阶段**:M3 文件管理 + 系统监控(见 [里程碑](#里程碑))
 
@@ -24,7 +24,6 @@
 │   │   └── webui/              # 嵌入前端静态资源(单二进制)
 │   ├── scripts/build.sh        # 构建脚本(host / android 交叉编译)
 │   ├── scripts/smoke-test.sh   # nas.sh 冒烟测试(机制层全平台/运行时层需 Linux)
-│   ├── termux-service/         # runit 服务脚本模板
 │   └── Makefile
 ├── .github/workflows/          # CI(ci.yml)+ 发布流水线(release.yml)
 ├── bin/                        # 构建产物或 nas.sh 下载的二进制(nasd)
@@ -55,14 +54,14 @@ bash ../nas.sh stop
 
 在手机 Termux 里**不需要安装 Go 工具链、不需要手动拷贝文件**。`nas.sh` 会自动:
 创建 `~/nas` 目录结构 → 从 GitHub Releases 拉取 android/arm64 预编译二进制 →
-SHA256 校验 → 赋予可执行权限 → 安装(可选注册开机自启)。
+SHA256 校验 → 赋予可执行权限 → 安装。
 
 ```bash
 pkg install curl                # 首次:补齐依赖
 # 国内网络建议经 ghfast.top 镜像下载脚本(nas.sh 内置下载同样默认走此镜像)
 curl -fsSL https://ghfast.top/https://raw.githubusercontent.com/LiquorXR/Termux-NAS/main/nas.sh -o nas.sh
-bash nas.sh install --service   # 安装 + 注册 runit 开机自启(termux-services)
-bash nas.sh start               # 启动 nasd
+bash nas.sh install             # 安装
+bash nas.sh start               # 后台启动 nasd(nohup,stderr 落盘 data/logs/nasd.stderr.log)
 ```
 
 > `nas.sh` 下载/更新主程序默认经 **ghfast.top 镜像**加速(`NAS_MIRROR`,
@@ -78,7 +77,7 @@ bash nas.sh start               # 启动 nasd
 
 | 命令 | 作用 |
 |------|------|
-| `bash nas.sh install [--service]` | 安装/修复(可选注册开机自启) |
+| `bash nas.sh install` | 安装/修复 |
 | `bash nas.sh update [-f] [版本]` | 更新到最新(或指定 `v<版本>`),自动校验/备份/回滚 |
 | `bash nas.sh start` / `stop` / `restart` | 启动 / 优雅停止 / 重启 |
 | `bash nas.sh status` / `log [-n N]` | 状态 / 查看日志尾部 |
@@ -99,11 +98,7 @@ bash nas.sh start               # 启动 nasd
 ```bash
 cd ~/nas/src && make android        # 交叉编译 android/arm64 静态二进制(含前端)
 # 产物在 ../bin/nasd,再用 nas.sh 后续流程管理即可
-mkdir -p $PREFIX/var/service/nasd/log
-cp termux-service/nasd-run.sh $PREFIX/var/service/nasd/run
-chmod +x $PREFIX/var/service/nasd/run
-sv-enable nasd                      # 开机自启(Termux:Boot)
-sv start nasd                       # 或: bash nas.sh start
+bash ../nas.sh start                # 后台启动 nasd(nohup)
 ```
 
 ## 通信与生命周期管理
@@ -125,7 +120,7 @@ sv start nasd                       # 或: bash nas.sh start
 | **M2** | 认证中心 + 前端壳(登录页/布局/HTMX)+ SQLite 会话 | ✅ |
 | **M3** | 内建模块:文件管理 + 系统监控(HTMX 轮询看板) | ✅ |
 | **M4** | 插件系统:管理器 API + 注册协议 + 反代 + 懒加载 + download 插件 | ✅ |
-| **M5** | 服务控制 + 备份中心 + 安全加固 | ✅ |
+| **M5** | 备份中心 + 安全加固 | ✅ |
 | **M6** | 原子更新流程 + 插件市场 + PWA + Tailscale 集成 | ✅ |
 
 ## M6 原子更新 + 插件市场 + PWA(已实现)
@@ -172,13 +167,7 @@ fmt.Printf(`{"id":"download","name":"下载中心","version":"1.0.0",
 - 提供 `GET /health` 返回 200(供探活)
 - 打包为 `.tar.gz`(内含单个可执行文件),在 Web UI「插件」页上传安装
 
-## M5 服务控制 + 备份中心 + 安全加固(已实现)
-
-### 服务控制
-- `internal/svc`:基于 termux-services(runit)的服务启停/重启/自启,解析 `sv status` 输出
-- 内置服务目录:sshd / samba / nginx / aria2 / cron / mysql
-- 平台适配:Termux/Linux 真实执行;Windows 开发环境自动模拟(MockRunner)
-- API:`/api/svc/list|start|stop|restart|autostart`;Web UI「服务」页(5s 轮询)
+## M5 备份中心 + 安全加固(已实现)
 
 ### 备份中心
 - `internal/backup`:任务 CRUD(SQLite 持久化)+ cron 调度 + 执行器 + 完成通知

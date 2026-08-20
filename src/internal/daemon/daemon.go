@@ -22,7 +22,6 @@ import (
 	"github.com/termux-nas/nas/internal/config"
 	"github.com/termux-nas/nas/internal/files"
 	"github.com/termux-nas/nas/internal/lock"
-	"github.com/termux-nas/nas/internal/svc"
 	"github.com/termux-nas/nas/internal/version"
 )
 
@@ -38,7 +37,6 @@ type Daemon struct {
 	files   *files.Store
 	app     *fiber.App
 	pm      *Manager        // 插件管理器(M4)
-	svc     *svc.Controller // 服务控制(M5)
 	backups *backup.Manager // 备份中心(M5)
 
 	stopOnce sync.Once // 仅用于执行 Stop 清理
@@ -92,9 +90,6 @@ func (d *Daemon) Run(ctx context.Context) error {
 	} else {
 		d.log.Info("插件扫描完成", "count", len(d.pm.List()))
 	}
-
-	// 2.5) 服务控制(M5):基于 termux-services,Windows 开发环境自动模拟
-	d.svc = svc.New(nil, nil, d.log)
 
 	// 2.6) 备份中心(M5):任务存储 + 调度 + 执行 + 通知
 	backupStore, err := backup.NewStore(d.db, d.log)

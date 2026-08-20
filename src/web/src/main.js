@@ -149,7 +149,7 @@ authSwitch.addEventListener('click', (e) => {
 
 // ---------- 主界面导航 ----------
 const jsPages = { files: renderFilesPage, monitor: renderMonitorPage };
-const partialPages = ['plugins', 'market', 'services', 'backup', 'settings'];
+const partialPages = ['plugins', 'market', 'backup', 'settings'];
 
 window.navTo = function (name) {
   document.querySelectorAll('[data-nav]').forEach((b) => {

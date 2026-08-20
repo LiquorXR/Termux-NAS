@@ -40,13 +40,13 @@
 Build a **pluggable mobile NAS** inside Termux:
 
 - **High performance, low footprint**: the main frame is a single Go binary; resident memory is roughly 15–30 MB
-- **Fully Termux-compatible**: runs without root, uses high ports, daemonized by termux-services
+- **Fully Termux-compatible**: runs without root, uses high ports, daemonized by `nohup`
 - **Extensible**: core functions are built in; extended functions are loaded dynamically as independent binary plugins
 - **Easy to manage**: a one-shot script (`nas.sh`) owns the whole `nasd` lifecycle (install/update/start/stop/status/log/uninstall); everything about plugins is controlled by the main frame (`nasd`) through the Web UI
 
 ### 1.2 Core design principles
 
-1. **Hybrid architecture** — core functions (auth / files / monitor / service control / backup) are built into `nasd`; extended functions (download / cloud drive / media / third-party) become plugins.
+1. **Hybrid architecture** — core functions (auth / files / monitor / backup) are built into `nasd`; extended functions (download / cloud drive / media / third-party) become plugins.
 2. **Single binary, single responsibility** — `nas.sh` manages only the `nasd` binary (install/update/start/stop/status/log/uninstall); `nasd` has full authority over plugins (install/uninstall/start-stop/update).
 3. **Process-level plugin isolation** — a crashing plugin never takes down the main frame, and plugins can be updated independently.
 4. **Lazy loading** — plugins start on demand (only when their page is opened); resident memory does not grow with the number of plugins.
@@ -76,9 +76,9 @@ Build a **pluggable mobile NAS** inside Termux:
 ┌──────────────────────────▼──────────────────────────────┐
 │             nasd · Main frame (resident daemon, one bin) │
 │                                                          │
-│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐    │
-│  │ Auth     │ │ Files    │ │ Monitor  │ │ Services │    │
-│  └──────────┘ └──────────┘ └──────────┘ └──────────┘    │
+│  ┌──────────┐ ┌──────────┐ ┌──────────┐    │
+│  │ Auth     │ │ Files    │ │ Monitor  │    │
+│  └──────────┘ └──────────┘ └──────────┘    │
 │  ┌──────────┐ ┌────────────────────────────────────┐     │
 │  │ Backup   │ │ Plugin manager(install/uninstall/  │     │
 │  └──────────┘ │ start-stop/update/lazy-load)        │     │
@@ -100,7 +100,7 @@ Build a **pluggable mobile NAS** inside Termux:
 | Component | Form | Responsibility | Resident |
 |---|---|---|---|
 | **nas.sh** | bash script (repo root) | full lifecycle of the main frame: install/update/start-stop/status/log/uninstall | no (run-and-exit) |
-| **nasd** | daemon binary | all runtime capabilities: HTTP service, built-in NAS features, **full plugin management** | yes (supervised by runit) |
+| **nasd** | daemon binary | all runtime capabilities: HTTP service, built-in NAS features, **full plugin management** | yes (background via nas.sh nohup) |
 | **Plugins** | independent binaries | extended features: download / cloud drive / media ...; lifecycle fully controlled by nasd | on demand (lazy load) |
 
 > **Single responsibility**: installing, uninstalling, starting/stopping and updating plugins can **only** be done
@@ -160,7 +160,6 @@ Conventions:
     ├── internal/                # all packages (see below)
     ├── web/                     # Vite front end
     ├── scripts/build.sh         # build helper (host / android)
-    ├── termux-service/nasd-run.sh
     └── Makefile
 ```
 
@@ -169,11 +168,10 @@ Conventions:
 | Package | Responsibility |
 |---|---|
 | `config` | deployment-root resolution, `data/config.json` load/save (atomic write) |
-| `daemon` | core: HTTP routing, DB open/migrate, plugin manager, service/backup/market HTTP handlers |
+| `daemon` | core: HTTP routing, DB open/migrate, plugin manager, backup/market HTTP handlers |
 | `auth` | Argon2id password hashing, SQLite sessions, cookie middleware, login rate limiting |
 | `files` | file CRUD / search / share links with strict path confinement |
 | `monitor` | system stats: CPU / memory / disk / network / battery (linux/android + windows builds) |
-| `svc` | termux-services (runit) service control, platform runner + mock runner |
 | `backup` | backup jobs: SQLite store, 5-field cron scheduler, rsync/copy executor, notifications |
 | `market` | embedded plugin-market index (`go:embed`) |
 | `plugin-subsystem` | lives under `daemon` (`plugins.go`, `plugins_http.go`, `proxy.go`) |
@@ -237,13 +235,12 @@ Notes:
 pkg install curl                # first-time dependency
 # Mainland-China users: fetch via ghfast.top mirror (nas.sh internally defaults to it too)
 curl -fsSL https://ghfast.top/https://raw.githubusercontent.com/LiquorXR/Termux-NAS/main/nas.sh -o nas.sh
-bash nas.sh install --service   # install + register runit boot auto-start
+bash nas.sh install          # install
 bash nas.sh start
 ```
 
 The installer automatically: creates the `~/nas` layout → downloads `nasd-android-arm64` from the
-latest GitHub Release (through mirror) → verifies SHA256 → chmod +x → places it → (optionally) registers
-the runit service.
+latest GitHub Release (through mirror) → verifies SHA256 → chmod +x → places it.
 
 Browse to `http://<phone-lan-ip>:7531`, follow the wizard to create the admin account.
 
@@ -252,11 +249,7 @@ Browse to `http://<phone-lan-ip>:7531`, follow the wizard to create the admin ac
 ```bash
 pkg install golang
 cd ~/nas/src && make android    # CGO_ENABLED=0 GOOS=android GOARCH=arm64, front end embedded
-mkdir -p $PREFIX/var/service/nasd/log
-cp termux-service/nasd-run.sh $PREFIX/var/service/nasd/run
-chmod +x $PREFIX/var/service/nasd/run
-sv-enable nasd
-sv start nasd                   # or: bash nas.sh start
+bash ../nas.sh start            # start nasd in the background (nohup)
 ```
 
 ---
@@ -269,12 +262,12 @@ All commands are listed in the quick table in README; this section explains inte
 ### 6.1 Command surface
 
 ```
-bash nas.sh install [--service]    # create layout → pull Release binary → SHA256 verify → place
+bash nas.sh install              # create layout → pull Release binary → SHA256 verify → place
 bash nas.sh update [-f] [版本]     # update to latest (or pinned v<version>)
 bash nas.sh start | stop | restart
 bash nas.sh status [-json] | log [-n N]
 bash nas.sh doctor                 # environment check (dirs/binary/health port/disk)
-bash nas.sh uninstall [-y] [--service]
+bash nas.sh uninstall [-y]
 bash nas.sh self-update
 bash nas.sh help | version
 ```
@@ -330,8 +323,7 @@ signal ctx (SIGINT/SIGTERM)
       1.5 Auth store (trust-proxy / secure-cookie flags applied)
       1.6 Files store (root default <root>/files, or cfg.FileRoot)
       2.  Plugin manager: scan & register metadata (no process start — lazy loading)
-      2.5 Service controller (termux-services; MockRunner on Windows dev)
-      2.6 Backup manager (store + scheduler + executor + notifier)
+      2.5 Backup manager (store + scheduler + executor + notifier)
       3.  Build HTTP app and listen on :7531 (in a goroutine)
       4.  Plugin idle-reap ticker
       5.  Backup schedule ticker (every minute)
@@ -358,7 +350,7 @@ block process exit (which would leave the single-instance lock held and block `n
 
 - Fiber app with `BodyLimit: 512 MiB`.
 - Global `securityHeaders` middleware.
-- `GET /health` (no auth, for nas.sh/runit probing) and `GET /api/version` (no auth).
+- `GET /health` (no auth, for nas.sh probing) and `GET /api/version` (no auth).
 - Page routes: `/login`, `/setup`, `/` (auth-aware handlers).
 - All `/api/...` business routes are auth-protected; state-changing ones also pass `checkSameOrigin`
   (Origin == Host). Exceptions: public share downloads under `/s/:token`.
@@ -411,17 +403,7 @@ block process exit (which would leave the single-instance lock held and block `n
 - The front-end dashboard (`pages/monitor.js`) polls every 3 s using ring gauges with threshold colors
   (≥80% warn, ≥90% danger).
 
-### 8.4 Service control (`internal/svc`)
-
-- Wraps termux-services (runit): `sv start|stop|restart`, `sv-enable`/`sv-disable` for auto-start.
-- Parses `sv status` output (`run:`/`down:` lines → state/PID/uptime); auto-start inferred from the presence of
-  a `down` file under `$PREFIX/var/service/<name>/`.
-- Built-in service list: sshd / samba / nginx / aria2 / cron / mysql.
-- Platform adaptation: real `ExecRunner` on Termux/Linux; `MockRunner` (in-memory simulation) on Windows for
-  local API/UI development and tests.
-- API: `/api/svc/list|start|stop|restart|autostart`; Web UI "Services" page polls every 5 s.
-
-### 8.5 Backup center (`internal/backup`)
+### 8.4 Backup center (`internal/backup`)
 
 - **Jobs** (`backup_jobs` table): name / source / target / schedule / enabled / keep_copies / last-run stats.
 - **Scheduling**: in-process ticker checks due jobs every minute against a 5-field cron expression
@@ -588,14 +570,6 @@ GET  /s/:token                     → public share download (attachment)
 GET /api/monitor/summary           → {cpu_percent, mem_*, disk_*, battery?, net?, platform, ...}
 ```
 
-### Services
-
-```
-GET  /api/svc/list
-POST /api/svc/start|stop|restart   → {name}
-POST /api/svc/autostart            → {name, enabled}
-```
-
 ### Backup
 
 ```
@@ -715,7 +689,7 @@ Manual release: `git tag v0.1.0 && git push origin v0.1.0`.
 | Core features | built into nasd | low memory, single process, Termux-friendly, simple deployment |
 | Management | single script nas.sh (SIGTERM / health / direct logs) | no extra Go admin binary; zero-programming ops |
 | Responsibility ownership | nas.sh manages only the main frame; nasd fully owns plugins (Web UI) | one management entry point, consistent operations, no dual state |
-| Process supervision | flock single-instance lock + runit (sv) | prevents dual-instance races; boot auto-start & crash restart |
+| Process supervision | flock single-instance lock + background via nas.sh nohup (nasd logs to disk) | prevents dual-instance races; restart with `nas.sh start` after a crash |
 | Plugin memory | lazy load + idle reap | resident memory doesn't grow with plugin count |
 | Communication | user-channel HTTP :7531 (only exposure) | no local admin socket, minimal attack surface |
 | SQLite driver | modernc.org/sqlite (pure Go) | `CGO_ENABLED=0` static builds work without a C toolchain on Termux |
@@ -730,7 +704,7 @@ All six milestones are complete (✅):
 - **M2** auth center + front-end shell (login/layout/HTMX) + SQLite sessions
 - **M3** built-ins: file management + system monitoring (HTMX polling dashboard)
 - **M4** plugin system: manager API + registration protocol + reverse proxy + lazy loading (+ download plugin)
-- **M5** service control + backup center + security hardening
+- **M5** backup center + security hardening
 - **M6** atomic update flow + plugin market + PWA (+ Tailscale documentation)
 
 Notable history (from git log): incremental M1–M6 feature commits; removal of the earlier `nasm`
@@ -769,8 +743,8 @@ Back up = copy `~/nas/` (plug-in binaries can be re-downloaded from the market).
 
 **Q: Can I run this on a normal desktop Linux?**
 A: Yes — `make build`, then `NAS_ROOT=/tmp/nas ./bin/nasd -root /tmp/nas`; manage via `bash nas.sh ...`
-(the script detects non-Termux Linux and skips runit registration). On Windows it also runs for development
-(svc uses a mock runner; single-instance uses a mutex) — full test coverage needs Linux/WSL2/Termux.
+(the script handles non-Termux Linux transparently). On Windows it also runs for development
+(single-instance uses a mutex) — full test coverage needs Linux/WSL2/Termux.
 
 ---
 *Generated from a full analysis of the repository at the time of writing (README v2.x, nas.sh 2.1.0,

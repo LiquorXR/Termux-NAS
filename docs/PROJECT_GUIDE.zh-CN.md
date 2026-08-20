@@ -39,13 +39,13 @@
 在 Termux 中构建一个**可插拔的移动端 NAS 系统**:
 
 - **高性能、低资源占用**:主框架为 Go 单二进制,常驻内存约 15–30 MB
-- **完全兼容移动端 Termux**:无 root 可用,高位端口,termux-services 守护
+- **完全兼容移动端 Termux**:无 root 可用,高位端口,nohup 后台守护
 - **可扩展**:核心功能内建,扩展功能以独立二进制插件形式动态加载
 - **易管理**:一键脚本(nas.sh)负责主框架 nasd 的生命周期(安装/更新/启停/状态/日志/卸载);插件的一切操作由主框架(nasd)通过 Web UI 统一控制
 
 ### 1.2 核心设计原则
 
-1. **混合架构** — 核心功能(认证/文件/监控/服务控制/备份)内建在 nasd;扩展功能(下载/云盘/媒体/第三方)做成插件。
+1. **混合架构** — 核心功能(认证/文件/监控/备份)内建在 nasd;扩展功能(下载/云盘/媒体/第三方)做成插件。
 2. **单二进制、职责单点** — nas.sh 只管理 nasd 本体(安装/更新/启停/状态/日志/卸载);nasd 全权控制插件(安装/卸载/启停/更新)。
 3. **插件进程级隔离** — 插件独立崩溃不影响主框架,可独立更新。
 4. **懒加载** — 插件按需启动(点开页面才启动进程),常驻内存不随插件数量增长。
@@ -74,9 +74,9 @@
 ┌──────────────────────────▼──────────────────────────────┐
 │             nasd · 主框架(常驻守护进程,单一二进制)          │
 │                                                          │
-│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐    │
-│  │ 认证中心  │ │ 文件管理  │ │ 系统监控  │ │ 服务控制  │    │
-│  └──────────┘ └──────────┘ └──────────┘ └──────────┘    │
+│  ┌──────────┐ ┌──────────┐ ┌──────────┐    │
+│  │ 认证中心  │ │ 文件管理  │ │ 系统监控  │    │
+│  └──────────┘ └──────────┘ └──────────┘    │
 │  ┌──────────┐ ┌────────────────────────────────────┐     │
 │  │ 备份中心  │ │ 插件管理器(安装/卸载/启停/更新/懒加载) │     │
 │  └──────────┘ └────────────────────────────────────┘     │
@@ -97,7 +97,7 @@
 | 组件 | 形态 | 职责 | 常驻 |
 |---|---|---|---|
 | **nas.sh** | bash 脚本(仓库根) | 主框架全生命周期:安装/更新/启停/状态/日志/卸载 | 否(用完即走) |
-| **nasd** | 守护进程二进制 | 运行时全部能力:HTTP 服务、内建 NAS 功能、**插件全权管理** | 是(runit 托管) |
+| **nasd** | 守护进程二进制 | 运行时全部能力:HTTP 服务、内建 NAS 功能、**插件全权管理** | 是(nas.sh nohup 后台) |
 | **插件** | 独立二进制 | 扩展功能:下载/云盘/媒体等;生命周期完全由 nasd 控制 | 按需(懒加载) |
 
 > **职责单点原则**:插件的安装、卸载、启停、更新**只能**通过 nasd(Web UI「插件管理」页或用户通道 API)操作,nas.sh 不感知插件存在。nas.sh 与插件之间不存在任何直接交互。
@@ -155,7 +155,6 @@
     ├── internal/                # 全部 Go 包(见下表)
     ├── web/                     # Vite 前端
     ├── scripts/build.sh         # 构建辅助(host / android)
-    ├── termux-service/nasd-run.sh
     └── Makefile
 ```
 
@@ -164,11 +163,10 @@
 | 包 | 职责 |
 |---|---|
 | `config` | 部署根解析、`data/config.json` 读写(原子写) |
-| `daemon` | 核心:HTTP 路由、DB 打开/迁移、插件管理器、服务/备份/市场 HTTP 处理器 |
+| `daemon` | 核心:HTTP 路由、DB 打开/迁移、插件管理器、备份/市场 HTTP 处理器 |
 | `auth` | Argon2id 密码哈希、SQLite 会话、Cookie 中间件、登录限流 |
 | `files` | 文件增删改查/搜索/分享链接(严格路径围栏) |
 | `monitor` | 系统状态:CPU/内存/磁盘/网络/电量(linux/android + windows 双平台) |
-| `svc` | termux-services(runit)服务控制,平台执行器 + Mock 执行器 |
 | `backup` | 备份任务:SQLite 存储、5 字段 cron 调度、rsync/复制执行器、通知 |
 | `market` | 内嵌插件市场索引(`go:embed`) |
 | 插件子系统 | 位于 `daemon` 包(`plugins.go`、`plugins_http.go`、`proxy.go`) |
@@ -231,12 +229,12 @@ bash ../nas.sh stop
 pkg install curl                # 首次:补齐依赖
 # 国内网络建议经 ghfast.top 镜像下载脚本(nas.sh 内置下载同样默认走此镜像)
 curl -fsSL https://ghfast.top/https://raw.githubusercontent.com/LiquorXR/Termux-NAS/main/nas.sh -o nas.sh
-bash nas.sh install --service   # 安装 + 注册 runit 开机自启
+bash nas.sh install   # 安装
 bash nas.sh start
 ```
 
 安装器自动完成:创建 `~/nas` 目录结构 → 从最新 GitHub Release(经镜像)拉取 `nasd-android-arm64` →
-SHA256 校验 → chmod +x → 落盘 →(可选)注册 runit 服务。
+SHA256 校验 → chmod +x → 落盘。
 
 浏览器访问 `http://<手机局域网IP>:7531`,按向导创建管理员账号即可。
 
@@ -245,11 +243,7 @@ SHA256 校验 → chmod +x → 落盘 →(可选)注册 runit 服务。
 ```bash
 pkg install golang
 cd ~/nas/src && make android    # CGO_ENABLED=0 GOOS=android GOARCH=arm64,内嵌前端
-mkdir -p $PREFIX/var/service/nasd/log
-cp termux-service/nasd-run.sh $PREFIX/var/service/nasd/run
-chmod +x $PREFIX/var/service/nasd/run
-sv-enable nasd                  # 注册并开机自启
-sv start nasd                   # 或: bash nas.sh start
+bash ../nas.sh start            # 后台启动 nasd(nohup)
 ```
 
 ---
@@ -261,12 +255,12 @@ sv start nasd                   # 或: bash nas.sh start
 ### 6.1 命令面
 
 ```
-bash nas.sh install [--service]    # 建目录 → 拉取 Release 二进制 → SHA256 校验 → 落盘
+bash nas.sh install             # 建目录 → 拉取 Release 二进制 → SHA256 校验 → 落盘
 bash nas.sh update [-f] [版本]     # 更新到最新(或指定 v<版本>)
 bash nas.sh start | stop | restart
 bash nas.sh status [-json] | log [-n N]
 bash nas.sh doctor                 # 体检(目录/二进制/健康端口/磁盘)
-bash nas.sh uninstall [-y] [--service]
+bash nas.sh uninstall [-y]
 bash nas.sh self-update
 bash nas.sh help | version
 ```
@@ -322,8 +316,7 @@ signal ctx(SIGINT/SIGTERM)
       1.5 认证存储(应用 trust-proxy / secure-cookie 选项)
       1.6 文件存储(默认 <root>/files,或 cfg.FileRoot)
       2.  插件管理器:扫描登记元信息(不启动进程——懒加载)
-      2.5 服务控制器(termux-services;Windows 开发环境自动用 MockRunner)
-      2.6 备份管理器(存储 + 调度 + 执行 + 通知)
+      2.5 备份管理器(存储 + 调度 + 执行 + 通知)
       3.  组装 HTTP 应用并以 goroutine 监听 :7531
       4.  插件空闲回收 ticker
       5.  备份调度 ticker(每分钟)
@@ -350,7 +343,7 @@ signal ctx(SIGINT/SIGTERM)
 
 - Fiber 应用,`BodyLimit: 512 MiB`。
 - 全局 `securityHeaders` 中间件。
-- `GET /health`(免鉴权,供 nas.sh/runit 探活)、`GET /api/version`(免鉴权)。
+- `GET /health`(免鉴权,供 nas.sh 探活)、`GET /api/version`(免鉴权)。
 - 页面路由:`/login`、`/setup`、`/`(按登录态分发)。
 - 全部 `/api/...` 业务路由需登录;写操作额外过 `checkSameOrigin`(Origin == Host)。
   例外:公开分享下载 `/s/:token`。
@@ -397,16 +390,7 @@ signal ctx(SIGINT/SIGTERM)
 - 电量经 `termux-battery-status`(仅当设置了 `$PREFIX`),带 10s 结果缓存,轮询时不会每请求拉起子进程。
 - 前端看板(`pages/monitor.js`)每 3s 轮询,环形进度按阈值变色(≥80% 预警,≥90% 危险)。
 
-### 8.4 服务控制(`internal/svc`)
-
-- 封装 termux-services(runit):`sv start|stop|restart`,`sv-enable`/`sv-disable` 设置自启。
-- 解析 `sv status` 输出(`run:`/`down:` → 状态/PID/Uptime);自启状态通过
-  `$PREFIX/var/service/<name>/` 下是否存在 `down` 文件间接判断。
-- 内置服务目录:ssh / samba / nginx / aria2 / cron / mysql。
-- 平台适配:Termux/Linux 用真实 `ExecRunner`;Windows 开发环境用 `MockRunner`(内存模拟)便于本地调试 API 与 UI。
-- API:`/api/svc/list|start|stop|restart|autostart`;Web UI「服务」页每 5s 轮询。
-
-### 8.5 备份中心(`internal/backup`)
+### 8.4 备份中心(`internal/backup`)
 
 - **任务**(`backup_jobs` 表):名称/源/目标/定时/启用/保留份数/最近运行统计。
 - **调度**:进程内 ticker 每分钟检查到期任务,匹配 5 字段 cron(支持 `* / , -`,分–周);
@@ -564,14 +548,6 @@ GET  /s/:token                     → 公开分享下载(attachment)
 GET /api/monitor/summary           → {cpu_percent, mem_*, disk_*, battery?, net?, platform, ...}
 ```
 
-### 服务
-
-```
-GET  /api/svc/list
-POST /api/svc/start|stop|restart   → {name}
-POST /api/svc/autostart            → {name, enabled}
-```
-
 ### 备份
 
 ```
@@ -668,7 +644,7 @@ GET|POST|PUT|DELETE /p/<id>[/...]  → 插件反向代理(统一鉴权,剥离敏
 ## 17. 测试与质量
 
 - **Go 单元/集成测试**(约 2,300 行、20 个文件)覆盖:认证(存储/限流/密码/基准)、
-  文件路径安全、分享、插件管理器 + HTTP + 反代端到端、服务控制(mock runner)、备份、
+  文件路径安全、分享、插件管理器 + HTTP + 反代端到端、备份、
   市场、守护安全头、DB、代理、电池缓存、safehttp。
 - **nas.sh 冒烟测试**(`scripts/smoke-test.sh`)双层:
   - *机制层*(任意 bash):目录创建、二进制落盘、重装幂等、SHA256 门禁(篡改校验和拒绝且无副作用)、
@@ -688,7 +664,7 @@ GET|POST|PUT|DELETE /p/<id>[/...]  → 插件反向代理(统一鉴权,剥离敏
 | 核心功能归属 | 内建在 nasd | 低内存、单进程、Termux 友好、部署简单 |
 | 管理方式 | 单一脚本 nas.sh(SIGTERM/health/日志直读) | 无需额外 Go 管理二进制;零编程能力即可运维 |
 | 职责单点 | nas.sh 只管理主框架生命周期;插件全权由 nasd 控制(Web UI) | 单一管理入口,避免两套命令/两处状态 |
-| 进程守护 | flock 单实例锁 + runit(sv)托管 | 防双实例竞态;开机自启与崩溃自动拉起 |
+| 进程守护 | flock 单实例锁 + nas.sh nohup 后台(nasd 日志自带落盘) | 防双实例竞态;崩溃后由 nas.sh start 重新拉起 |
 | 插件内存策略 | 懒加载 + 空闲回收 | 常驻内存不随插件数量增长 |
 | 通信协议 | 用户通道 HTTP :7531(唯一对外) | 无本地管理 socket,精简暴露面 |
 | SQLite 驱动 | modernc.org/sqlite(纯 Go) | `CGO_ENABLED=0` 静态编译,Termux 无 C 链也能构建 |
@@ -703,7 +679,7 @@ GET|POST|PUT|DELETE /p/<id>[/...]  → 插件反向代理(统一鉴权,剥离敏
 - **M2** 认证中心 + 前端壳(登录页/布局/HTMX)+ SQLite 会话
 - **M3** 内建模块:文件管理 + 系统监控(轮询看板)
 - **M4** 插件系统:管理器 API + 注册协议 + 反向代理 + 懒加载(+ download 插件)
-- **M5** 服务控制 + 备份中心 + 安全加固
+- **M5** 备份中心 + 安全加固
 - **M6** 原子更新流程 + 插件市场 + PWA(+ Tailscale 文档引导)
 
 历史要点(据 git log):M1–M6 分里程碑提交;移除早期 `nasm` 管理模块改为 nas.sh 全周期管理;
@@ -740,7 +716,7 @@ A: 一切都在 `~/nas/`:`data/nas.db`(会话/分享/备份任务)、`data/confi
 
 **Q: 我能在普通桌面 Linux 上跑吗?**
 A: 可以——`make build` 后 `NAS_ROOT=/tmp/nas ./bin/nasd -root /tmp/nas`,用 `bash nas.sh ...`
-管理(脚本会识别非 Termux 环境并跳过 runit 注册)。Windows 也可用于开发(svc 用 mock、单实例用互斥量),
+管理。Windows 也可用于开发(单实例用互斥量),
 但完整测试覆盖需 Linux/WSL2/Termux。
 
 ---

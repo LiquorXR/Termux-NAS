@@ -28,7 +28,7 @@ func (d *Daemon) buildHTTP() (*fiber.App, error) {
 	// 安全响应头(M5 安全加固):全局中间件
 	app.Use(securityHeaders)
 
-	// 健康检查(供 nas.sh 探活与 runit 监控)
+	// 健康检查(供 nas.sh 探活)
 	app.Get("/health", func(c *fiber.Ctx) error {
 		return c.JSON(fiber.Map{
 			"status":  "ok",
@@ -98,13 +98,6 @@ func (d *Daemon) buildHTTP() (*fiber.App, error) {
 
 	// --- M3 系统监控 ---
 	app.Get("/api/monitor/summary", d.auth.RequireAuth, d.monitorSummary)
-
-	// --- M5 服务控制 ---
-	app.Get("/api/svc/list", d.auth.RequireAuth, d.svcList)
-	app.Post("/api/svc/start", checkSameOrigin, d.auth.RequireAuth, d.svcStart)
-	app.Post("/api/svc/stop", checkSameOrigin, d.auth.RequireAuth, d.svcStop)
-	app.Post("/api/svc/restart", checkSameOrigin, d.auth.RequireAuth, d.svcRestart)
-	app.Post("/api/svc/autostart", checkSameOrigin, d.auth.RequireAuth, d.svcAutostart)
 
 	// --- M5 备份中心 ---
 	app.Get("/api/backup/jobs", d.auth.RequireAuth, d.backupJobs)

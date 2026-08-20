@@ -20,13 +20,13 @@
 在 Termux 中构建一个**可插拔的移动端 NAS 系统**:
 
 - **高性能、低资源占用**:主框架为 Go 单二进制,常驻内存约 15-30MB
-- **完全兼容移动端 Termux**:无 root 可用,高位端口,termux-services 守护
+- **完全兼容移动端 Termux**:无 root 可用,高位端口,nohup 后台守护
 - **可扩展**:核心功能内建,扩展功能以独立二进制插件形式动态加载
 - **易管理**:一键脚本(nas.sh)负责主框架 nasd 的生命周期(安装/更新/启停/状态/日志/卸载);插件的一切操作由主框架(nasd)统一控制
 
 ### 1.2 核心设计原则
 
-1. **混合架构**:核心功能(认证/文件/监控/服务控制/备份)内建在 nasd;扩展功能(下载/云盘/媒体/第三方)做成插件
+1. **混合架构**:核心功能(认证/文件/监控/备份)内建在 nasd;扩展功能(下载/云盘/媒体/第三方)做成插件
 2. **单二进制、职责单点**:nas.sh 只管理 nasd 本体(安装/更新/启停/状态/日志/卸载);nasd 全权控制插件(安装/卸载/启停/更新)
 3. **插件进程级隔离**:插件独立崩溃不影响主框架,可独立更新
 4. **懒加载**:插件按需启动(点开页面才启动进程),常驻内存不增加
@@ -45,9 +45,9 @@
 ┌──────────────────────────▼──────────────────────────────┐
 │             nasd · 主框架(常驻守护进程,单一二进制)          │
 │                                                          │
-│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐    │
-│  │ 认证中心  │ │ 文件管理  │ │ 系统监控  │ │ 服务控制  │    │
-│  └──────────┘ └──────────┘ └──────────┘ └──────────┘    │
+│  ┌──────────┐ ┌──────────┐ ┌──────────┐    │
+│  │ 认证中心  │ │ 文件管理  │ │ 系统监控  │    │
+│  └──────────┘ └──────────┘ └──────────┘    │
 │  ┌──────────┐ ┌────────────────────────────────────┐     │
 │  │ 备份中心  │ │ 插件管理器(安装/卸载/启停/更新/懒加载) │     │
 │  └──────────┘ └────────────────────────────────────┘     │
@@ -68,7 +68,7 @@
 | 组件 | 形态 | 职责 | 常驻 |
 |------|------|------|------|
 | **nas.sh** | bash 脚本(仓库根) | 主框架全生命周期:安装/更新/启停/状态/日志/卸载 | 否(用完即走) |
-| **nasd** | 守护进程二进制 | 运行时全部能力:HTTP 服务、内建 NAS 功能、**插件全权管理** | 是(runit 托管) |
+| **nasd** | 守护进程二进制 | 运行时全部能力:HTTP 服务、内建 NAS 功能、**插件全权管理** | 是(nas.sh nohup 后台) |
 | **插件** | 独立二进制 | 扩展功能:下载/云盘/媒体等;生命周期完全由 nasd 控制 | 按需(懒加载) |
 
 > **职责单点原则**:插件的安装、卸载、启停、更新**只能**通过 nasd(Web UI 的「插件管理」页或用户通道 API)操作,nas.sh 不感知插件存在。nas.sh 与插件之间不存在任何直接交互。
@@ -117,7 +117,7 @@
 ### 4.1 命令设计
 
 ```
-bash nas.sh install [--service]  # 安装(可选注册 runit 开机自启)
+bash nas.sh install             # 安装
 bash nas.sh update [-f] [版本]    # 更新到最新(或指定 v<版本>)
 bash nas.sh start|stop|restart   # 启动/优雅停止/重启
 bash nas.sh status|log [-n N]    # 状态/日志尾部
@@ -158,7 +158,7 @@ bash nas.sh self-update          # 更新 nas.sh 自身
 ### 5.1 进程生命周期
 
 ```
-启动:Termux:Boot → nas.sh/ sv → runit 托管 nasd
+启动:bash nas.sh start(nohup 后台,stderr 落盘 data/logs/nasd.stderr.log)
 运行:nasd 启动(flock 单实例锁)→ 加载配置 → 打开 SQLite → 扫描插件(登记,不启动)
      → 启动 HTTP :7531(/health 供探活)
 停止:SIGTERM → 逐个停止插件 → 关闭 HTTP(超时)→ 释放单实例锁 → 退出
@@ -171,7 +171,6 @@ bash nas.sh self-update          # 更新 nas.sh 自身
 | **认证中心** | 登录/会话/权限/CSRF | SQLite 会话表 + cookie;首次启动生成管理员账号 |
 | **文件管理** | 浏览/上传/下载/删除/重命名/分享链接/搜索 | `os` + `io/fs` 操作 `~/storage` 共享目录;分享链接带短 token |
 | **系统监控** | CPU/内存/温度/电量/磁盘/网络流量 | 读 `/proc` + termux-api(`termux-battery-status` 等);前端轮询看板 |
-| **服务控制** | Samba/SSH/nginx/aria2 等启停、自启、状态 | 进程管理封装(`Svc()` API);基于 termux-services |
 | **备份中心** | 定时备份/rsync 同步/GPG 加密/完成通知 | cron 调度 + `termux-notification` |
 | **插件管理** | 插件安装/卸载/启停/更新/状态(Web UI) | 见 5.3;插件的一切操作仅通过本模块 |
 
@@ -237,7 +236,6 @@ GET  /api/plugins/<id>/log       # 插件日志
 | SQLite 访问 | 共享 `data/nas.db`,插件可建自己的表(自动迁移) |
 | 配置读写 | `data/config.json`,按插件 ID 分区 |
 | 日志 | 统一收集到 `data/logs/plugin-<id>.log` |
-| 服务控制 | 插件可调用 `Svc()` 启停系统服务(Samba/aria2 等) |
 | 事件总线(可选) | 插件间发布/订阅事件(如"文件已上传"→ 通知插件) |
 | 系统信息 | CPU/温度/电量等,插件可查询 |
 
@@ -322,11 +320,6 @@ GET  /api/monitor/summary       # CPU/内存/温度/电量汇总
 GET  /api/monitor/history?r=1h  # 历史曲线数据
 GET  /api/monitor/net           # 网络流量
 
-GET  /api/svc/list              # 服务列表及状态
-POST /api/svc/start             # 启动服务 (body: {name})
-POST /api/svc/stop              # 停止服务
-POST /api/svc/autostart         # 设置开机自启
-
 GET  /api/backup/jobs           # 备份任务列表
 POST /api/backup/jobs           # 新建任务
 POST /api/backup/run            # 立即执行
@@ -368,7 +361,7 @@ GET  /p/<plugin_id>/*           # 插件路由(反代,统一鉴权)
 | **M2** | 认证中心 + 前端壳(登录页/布局/导航)+ SQLite | 能登录的空壳 NAS |
 | **M3** | 内建模块:文件管理 + 系统监控(轮询看板) | NAS 核心功能可用 |
 | **M4** | 插件系统:管理器(安装/卸载/启停/更新 API)+ 注册协议 + 反代 + 懒加载 + download 插件验证 | 插件全链路跑通,Web UI 插件管理页可用 |
-| **M5** | 服务控制 + 备份中心 + 安全加固 | 完整 NAS |
+| **M5** | 备份中心 + 安全加固 | 完整 NAS |
 | **M6** | 原子更新流程 + 插件市场 + PWA + Tailscale 集成 | 可日常使用 |
 
 ---
@@ -385,9 +378,9 @@ GET  /p/<plugin_id>/*           # 插件路由(反代,统一鉴权)
 # 依赖(仅 base/curl;无需 golang)
 pkg install curl
 
-# 安装 + 注册 runit 开机自启
+# 安装
 curl -LO https://raw.githubusercontent.com/LiquorXR/Termux-NAS/main/nas.sh
-bash nas.sh install --service
+bash nas.sh install
 bash nas.sh start
 
 # 日常
@@ -407,16 +400,13 @@ bash nas.sh uninstall -y      # 卸载(需 -y 才删数据)
 
 ```bash
 # 依赖
-pkg install golang termux-services termux-api
+pkg install golang termux-api
 
 # 构建(单一二进制 nasd)
 cd ~/nas/src && CGO_ENABLED=0 go build -ldflags="-s -w" -o ../bin/nasd ./cmd/nasd
 
-# 服务注册(runit)
-pkg install termux-services
-mkdir -p $PREFIX/var/service/nasd/log
-# 编写 run 脚本启动 nasd,sv-enable nasd 实现开机自启
-# (或直接使用 termux-service/nasd-run.sh 模板)
+# 启动
+bash ../nas.sh start            # nohup 后台
 
 # 权限与保活
 # - 电池设置:Termux 加入"不限制后台"
@@ -435,6 +425,6 @@ mkdir -p $PREFIX/var/service/nasd/log
 | 核心功能归属 | 内建在 nasd | 低内存、单进程、Termux 友好、部署简单 |
 | 管理方式 | 单一脚本 nas.sh(SIGTERM/health/日志直读) | 无需额外 Go 管理二进制;零编程能力即可运维 |
 | **职责单点** | **nas.sh 只管理主框架生命周期;插件全权由 nasd 控制(Web UI)** | 单一管理入口,避免两套命令/两处状态,操作一致性好 |
-| 进程守护 | 单实例锁(flock)+ runit(sv)托管 | 防双实例竞态;开机自启与崩溃自动拉起 |
+| 进程守护 | 单实例锁(flock)+ nas.sh nohup 后台(nasd 日志自带落盘) | 防双实例竞态;崩溃后由 nas.sh start 重新拉起 |
 | 插件内存策略 | 懒加载 + 空闲回收 | 常驻内存不随插件数量增长 |
 | 通信协议 | 用户通道 HTTP :7531(唯一对外) | 无本地管理 socket,精简暴露面 |

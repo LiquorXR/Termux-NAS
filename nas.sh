@@ -6,7 +6,7 @@
 #   安装 / 更新 / 启动 / 停止 / 重启 / 状态 / 日志 / 卸载。
 #
 # 管理方式(无需任何 Go 管理工具):
-#   - 启动:后台 nohup 拉起
+#   - 启动:后台 nohup 拉起(错误输出落盘 data/logs/nasd.stderr.log 便于排错)
 #   - 停止:SIGTERM 优雅停止(等进程退出,超时再 SIGKILL)
 #   - 探活:HTTP /health(endpoint)+ 单实例锁 pid(run/nas.lock)
 #   - 日志:直读 data/logs/nasd.log 尾部
@@ -279,17 +279,18 @@ start_nasd() {
     return 0
   fi
 
-  # 后台拉起(nasd 自身写 data/logs/nasd.log)
+  # 后台拉起(nasd 自身写 data/logs/nasd.log;stderr 落盘以便启动失败排查)
   info "后台启动 nasd..."
+  local stderr_log="$NAS_ROOT/data/logs/nasd.stderr.log"
   if command -v nohup >/dev/null 2>&1; then
-    nohup "$(nasd_bin)" -root "$NAS_ROOT" >/dev/null 2>&1 &
+    nohup "$(nasd_bin)" -root "$NAS_ROOT" >>"$stderr_log" 2>&1 &
   else
-    "$(nasd_bin)" -root "$NAS_ROOT" >/dev/null 2>&1 &
+    "$(nasd_bin)" -root "$NAS_ROOT" >>"$stderr_log" 2>&1 &
   fi
   if wait_ready 30; then
     info "nasd 已启动(pid $(nasd_pids | head -n1))"
   else
-    err "nasd 启动超时(健康检查未通过),请查看日志: $(log_path)"
+    err "nasd 启动超时(健康检查未通过),请查看日志: $(log_path) 与 $stderr_log"
   fi
 }
 
@@ -476,7 +477,7 @@ Termux NAS 一键管理脚本(nas.sh)
                                    赋予可执行权限
   bash nas.sh update [-f] [版本]   更新到最新(或指定 v<版本>):
                                    下载→校验→优雅停止→原子替换(.bak)→重启→失败回滚
-  bash nas.sh start                启动 nasd(后台 nohup)
+  bash nas.sh start                启动 nasd(后台 nohup,stderr 落盘 data/logs/nasd.stderr.log)
   bash nas.sh stop                 优雅停止 nasd(SIGTERM,超时强制结束)
   bash nas.sh restart              重启 nasd
   bash nas.sh status               查看运行状态(版本/PID/Uptime/端口)
