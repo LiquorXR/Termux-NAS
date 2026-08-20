@@ -108,11 +108,16 @@ ensure_dirs() {
 }
 
 # ---------------- 下载与校验 ----------------
-# 给 GitHub 直链加镜像前缀加速(NAS_MIRROR 置空则直连)
+# 给 GitHub 直链加镜像前缀加速(NAS_MIRROR 置空则直连)。
+# 保证前缀以 "/" 结尾再拼接,避免出现 "ghfast.tophttps://..." 的 URL 错误。
 github_url() {
-  local url="$1"
-  if [ -n "${NAS_MIRROR:-}" ]; then
-    printf '%s%s' "${NAS_MIRROR%/}" "$url"
+  local url="$1" m="${NAS_MIRROR:-}"
+  if [ -n "$m" ]; then
+    case "$m" in
+      */) : ;;
+      *) m="$m/" ;;
+    esac
+    printf '%s%s' "$m" "$url"
   else
     printf '%s' "$url"
   fi

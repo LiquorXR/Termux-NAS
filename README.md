@@ -59,10 +59,15 @@ SHA256 校验 → 赋予可执行权限 → 安装(可选注册开机自启)。
 
 ```bash
 pkg install curl                # 首次:补齐依赖
-curl -LO https://raw.githubusercontent.com/LiquorXR/Termux-NAS/main/nas.sh
+# 国内网络建议经 ghfast.top 镜像下载脚本(nas.sh 内置下载同样默认走此镜像)
+curl -fsSL https://ghfast.top/https://raw.githubusercontent.com/LiquorXR/Termux-NAS/main/nas.sh -o nas.sh
 bash nas.sh install --service   # 安装 + 注册 runit 开机自启(termux-services)
 bash nas.sh start               # 启动 nasd
 ```
+
+> `nas.sh` 下载/更新主程序默认经 **ghfast.top 镜像**加速(`NAS_MIRROR`,
+> 默认 `https://ghfast.top/`);需要直连 GitHub 时:`export NAS_MIRROR=`,
+> 或用 `NAS_MIRROR` 换成其它镜像。
 
 浏览器访问 `http://<手机局域网IP>:7531`。
 
