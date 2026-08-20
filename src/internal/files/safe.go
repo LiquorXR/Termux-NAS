@@ -28,8 +28,14 @@ func Normalize(root, rel string) (string, error) {
 	if rel == "" || rel == "/" || rel == "." {
 		return root, nil
 	}
-	// 统一拒绝绝对路径:Windows 盘符路径(含 "C:foo" 相对盘符变体)+ 前导斜杠
-	if filepath.IsAbs(rel) || strings.HasPrefix(rel, "/") || drivePrefixRe.MatchString(rel) {
+	// 统一拒绝绝对路径,且不依赖当前平台分隔符语义:
+	//  1) filepath.IsAbs: 当前平台的绝对路径(Windows 上会命中 UNC/反斜杠)
+	//  2) 前导 "/":POSIX 绝对路径
+	//  3) 前导 "\\":UNC 路径(在 Linux/Termux 上 \ 不是分隔符,需显式拦截,
+	//     否则 \\server\share 会被当作普通相对路径放行)
+	//  4) 盘符前缀(含 "C:foo" 相对盘符变体)
+	if filepath.IsAbs(rel) || strings.HasPrefix(rel, "/") ||
+		strings.HasPrefix(rel, `\\`) || drivePrefixRe.MatchString(rel) {
 		return "", ErrAbsPath
 	}
 	clean := filepath.Clean(filepath.FromSlash(rel))
