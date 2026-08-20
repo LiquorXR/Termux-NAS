@@ -426,7 +426,10 @@ cmd_update() {
       die "已回滚到旧版本 v$(probe_version "$(nasd_bin)")"
     }
     info "nasd 更新完成: v$(probe_version "$(nasd_bin)")"
-    rm -f "$(nasd_bin).bak"
+    # 保留最近一份旧版 .bak 便于手动回滚(每次更新仅覆盖同名文件,体积有界)
+    if [ -f "$(nasd_bin).bak" ]; then
+      info "旧版已保留: nasd.bak(如需回滚: 替换回 bin/nasd 后重启)"
+    fi
   else
     info "更新完成(未启动),可执行 bash nas.sh start"
   fi
