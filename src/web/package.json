@@ -1,0 +1,18 @@
+{
+  "name": "termux-nas-web",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Termux NAS 前端(Vite 开发,生产构建产物由 nasd go:embed)",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "htmx.org": "^2.0.4"
+  },
+  "devDependencies": {
+    "vite": "^5.4.11"
+  }
+}

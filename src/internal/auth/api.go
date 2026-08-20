@@ -115,6 +115,22 @@ func (s *Store) HandleMe(c *fiber.Ctx) error {
 	})
 }
 
+// HandleStatus 初始化与会话状态(免鉴权;SPA 首屏三态判断:未初始化/未登录/已登录)。
+func (s *Store) HandleStatus(c *fiber.Ctx) error {
+	has, err := s.HasUsers()
+	if err != nil {
+		s.log.Error("检查用户数失败", "err", err)
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "系统内部错误"})
+	}
+	authed := false
+	username := ""
+	if u := s.SessionUser(c); u != nil {
+		authed = true
+		username = u.Username
+	}
+	return c.JSON(fiber.Map{"initialized": has, "authed": authed, "username": username})
+}
+
 // validUsername 校验用户名格式(字母/数字/-/_/.,2-32 位)。
 func validUsername(u string) bool {
 	if len(u) < 2 || len(u) > 32 {

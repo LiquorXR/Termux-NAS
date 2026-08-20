@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<script>
+/* 防闪烁:启动前按 localStorage/prefers-color-scheme 设置主题 */
+(function () {
+  try {
+    var t = localStorage.getItem('nas-theme') || 'system';
+    var dark = t === 'dark' || (t === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+    document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
+  } catch (e) { document.documentElement.setAttribute('data-theme', 'dark'); }
+})();
+</script>
+<title>Termux NAS</title>
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0c0e13">
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#f4f6fa">
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
+</head>
+<body>
+
+<!-- 图标库(统一 1.8px 线性 stroke,当前色) -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+<defs>
+  <symbol id="i-logo" viewBox="0 0 24 24"><path d="M12 2 20 6.5v11L12 22l-8-4.5v-11z"/><circle cx="12" cy="12" r="3.2"/></symbol>
+  <symbol id="i-files" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></symbol>
+  <symbol id="i-monitor" viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></symbol>
+  <symbol id="i-plugins" viewBox="0 0 24 24"><path d="M20.5 13.5a3 3 0 1 1-3 3 1 1 0 0 0-1-1h-1a3 3 0 1 1-3-3 1 1 0 0 0 1-1V10a3 3 0 1 1 3-3 1 1 0 0 0 1 1h1a3 3 0 1 1 3 3 1 1 0 0 0-1 1z"/></symbol>
+  <symbol id="i-market" viewBox="0 0 24 24"><path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/><path d="M3 6h18"/><path d="M16 10a4 4 0 0 1-8 0"/></symbol>
+  <symbol id="i-services" viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 1.66 3.58 3 8 3s8-1.34 8-3V5"/><path d="M4 12c0 1.66 3.58 3 8 3s8-1.34 8-3"/></symbol>
+  <symbol id="i-backup" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l3 3"/></symbol>
+  <symbol id="i-settings" viewBox="0 0 24 24"><path d="M21 4h-7"/><path d="M10 4H3"/><path d="M21 12h-9"/><path d="M8 12H3"/><path d="M21 20h-5"/><path d="M12 20H3"/><path d="M14 2v4"/><path d="M8 10v4"/><path d="M16 18v4"/></symbol>
+  <symbol id="i-more" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></symbol>
+  <symbol id="i-logout" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/></symbol>
+  <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></symbol>
+  <symbol id="i-moon" viewBox="0 0 24 24"><path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8z"/></symbol>
+  <symbol id="i-upload" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M17 8l-5-5-5 5"/><path d="M12 3v12"/></symbol>
+  <symbol id="i-download" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></symbol>
+  <symbol id="i-share" viewBox="0 0 24 24"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.6 13.5l6.8 4M15.4 6.5l-6.8 4"/></symbol>
+  <symbol id="i-edit" viewBox="0 0 24 24"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5z"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M10 11v6M14 11v6"/></symbol>
+  <symbol id="i-folder-plus" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M12 10v6M15 13H9"/></symbol>
+  <symbol id="i-back" viewBox="0 0 24 24"><path d="M19 12H5"/><path d="M12 19l-7-7 7-7"/></symbol>
+  <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></symbol>
+  <symbol id="i-file" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></symbol>
+  <symbol id="i-image" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 19l6-6 4 4 3-3 5 5"/><circle cx="8.5" cy="10" r="1.5"/></symbol>
+  <symbol id="i-video" viewBox="0 0 24 24"><rect x="2" y="6" width="14" height="12" rx="2"/><path d="M16 10l6-3v10l-6-3z"/></symbol>
+  <symbol id="i-audio" viewBox="0 0 24 24"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></symbol>
+  <symbol id="i-archive" viewBox="0 0 24 24"><path d="M21 8v13H3V8"/><path d="M1 3h22v5H1z"/><path d="M10 12h4"/></symbol>
+  <symbol id="i-doc" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M9 13h6M9 17h6"/></symbol>
+  <symbol id="i-package" viewBox="0 0 24 24"><path d="M21 8l-9-5-9 5v8l9 5 9-5z"/><path d="M3 8l9 5 9-5"/><path d="M12 13v8"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></symbol>
+</defs>
+</svg>
+
+<!-- 认证视图(登录 / 首次设置,由 main.js 按 /api/auth/status 切换) -->
+<div id="auth-view" hidden>
+  <div class="auth-wrap">
+    <h1>Termux<span class="dot"> NAS</span></h1>
+    <p class="sub" id="auth-sub"></p>
+    <form id="auth-form">
+      <label for="auth-user">用户名</label>
+      <input id="auth-user" name="username" autocomplete="username" required>
+      <label for="auth-pass">密码</label>
+      <input id="auth-pass" name="password" type="password" autocomplete="current-password" required>
+      <div id="auth-pw2-wrap" hidden>
+        <label for="auth-pass2">确认密码</label>
+        <input id="auth-pass2" type="password" autocomplete="new-password" minlength="8" required>
+      </div>
+      <button type="submit" class="auth-btn" id="auth-btn">登录</button>
+      <div class="err" id="auth-err"></div>
+      <p class="auth-alt"><a id="auth-switch" href="#">首次使用?创建管理员账号</a></p>
+    </form>
+  </div>
+</div>
+
+<!-- 主界面 -->
+<div id="app-view" hidden>
+  <!-- 桌面侧边栏 -->
+  <aside class="sidebar">
+    <div class="brand">
+      <svg><use href="#i-logo"/></svg>
+      Termux<span class="dot"> NAS</span>
+    </div>
+    <nav class="snav">
+      <button data-nav="files" class="active"><svg><use href="#i-files"/></svg><span>文件</span></button>
+      <button data-nav="monitor"><svg><use href="#i-monitor"/></svg><span>监控</span></button>
+      <button data-nav="plugins"><svg><use href="#i-plugins"/></svg><span>插件</span></button>
+      <button data-nav="market"><svg><use href="#i-market"/></svg><span>市场</span></button>
+      <button data-nav="services"><svg><use href="#i-services"/></svg><span>服务</span></button>
+      <button data-nav="backup"><svg><use href="#i-backup"/></svg><span>备份</span></button>
+      <button data-nav="settings"><svg><use href="#i-settings"/></svg><span>设置</span></button>
+    </nav>
+    <div class="sidebar-foot">
+      <div class="sidebar-user">
+        <div class="avatar" id="uname-avatar">U</div>
+        <span id="uname"></span>
+      </div>
+      <div class="sidebar-foot-row">
+        <button type="button" class="btn ghost" id="btn-theme">
+          <svg><use id="theme-icon" href="#i-moon"/></svg><span id="theme-label">深色</span>
+        </button>
+        <button type="button" class="btn ghost" id="btn-logout">
+          <svg><use href="#i-logout"/></svg><span>退出</span>
+        </button>
+      </div>
+    </div>
+  </aside>
+
+  <!-- 移动端顶栏 -->
+  <header class="topbar">
+    <div class="brand">
+      <svg><use href="#i-logo"/></svg>
+      Termux<span class="dot"> NAS</span>
+    </div>
+    <div class="topbar-actions">
+      <button type="button" class="icon-btn" id="btn-theme-m">
+        <svg><use id="theme-icon-m" href="#i-moon"/></svg>
+      </button>
+      <button type="button" class="icon-btn" id="btn-logout-m">
+        <svg><use href="#i-logout"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <main id="content"></main>
+
+  <!-- 移动端底部导航 -->
+  <nav class="tabbar">
+    <button data-nav="files" class="active"><svg><use href="#i-files"/></svg>文件</button>
+    <button data-nav="monitor"><svg><use href="#i-monitor"/></svg>监控</button>
+    <button data-nav="plugins"><svg><use href="#i-plugins"/></svg>插件</button>
+    <button data-nav="market"><svg><use href="#i-market"/></svg>市场</button>
+    <button id="btn-more"><svg><use href="#i-more"/></svg>更多</button>
+  </nav>
+
+  <!-- “更多”底部抽屉 -->
+  <div class="sheet-mask" id="sheet-mask">
+    <div class="sheet">
+      <button class="sheet-item" data-nav="services"><svg><use href="#i-services"/></svg>服务</button>
+      <button class="sheet-item" data-nav="backup"><svg><use href="#i-backup"/></svg>备份</button>
+      <button class="sheet-item" data-nav="settings"><svg><use href="#i-settings"/></svg>设置</button>
+    </div>
+  </div>
+</div>
+
+<!-- 全局 Toast 容器 -->
+<div id="toasts"></div>
+
+<!-- 全局对话框(确认 / 输入) -->
+<div class="dialog-mask" id="dialog-mask" hidden>
+  <div class="dialog">
+    <h3 id="dialog-title"></h3>
+    <p class="dialog-text" id="dialog-text"></p>
+    <input id="dialog-input" hidden>
+    <div class="dialog-btns">
+      <button type="button" class="btn" id="dialog-cancel">取消</button>
+      <button type="button" class="btn primary" id="dialog-ok">确定</button>
+    </div>
+  </div>
+</div>
+
+<script type="module" src="/src/main.js"></script>
+</body>
+</html>

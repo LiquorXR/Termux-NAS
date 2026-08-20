@@ -38,6 +38,9 @@ case "$TARGET" in
     echo "未知目标: $TARGET (可用: host | android)" >&2; exit 1 ;;
 esac
 
+echo "==> 构建前端(Vite → internal/webui/dist,go:embed 打包)"
+( cd "$ROOT/web" && npm ci && npm run build )
+
 echo "==> 构建 target=${TARGET} GOOS=${GOOS} GOARCH=${GOARCH}"
 rm -f "$OUT"/nasm "$OUT"/nasd "$OUT"/nasm.exe "$OUT"/nasd.exe
 for bin in nasm nasd; do

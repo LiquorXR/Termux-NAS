@@ -18,3 +18,8 @@ Thumbs.db
 
 # 日志
 *.log
+
+# 前端 Node 构建产物(构建时生成)
+src/web/node_modules/
+src/internal/webui/dist/
+.opencode/

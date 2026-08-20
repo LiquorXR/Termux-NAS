@@ -1,0 +1,65 @@
+<div class="card">
+  <h2>设置</h2>
+  <p>系统信息与通用设置。</p>
+
+  <div class="set-sec-title">外观</div>
+  <div class="set-row">
+    <span>主题</span>
+    <div class="seg" id="st-theme">
+      <button type="button" data-theme-opt="system">跟随系统</button>
+      <button type="button" data-theme-opt="dark">深色</button>
+      <button type="button" data-theme-opt="light">浅色</button>
+    </div>
+  </div>
+
+  <div class="set-sec-title">系统信息</div>
+  <div class="set-row"><span>版本</span><span class="set-val" id="st-version">…</span></div>
+  <div class="set-row"><span>提交</span><span class="set-val" id="st-commit">…</span></div>
+  <div class="set-row"><span>构建时间</span><span class="set-val" id="st-build">…</span></div>
+  <div class="set-row"><span>平台</span><span class="set-val" id="st-platform">…</span></div>
+  <div class="set-row"><span>主机名</span><span class="set-val" id="st-host">…</span></div>
+
+  <div class="set-sec-title">存储</div>
+  <div class="set-row"><span>磁盘占用</span><span class="set-val" id="st-disk">…</span></div>
+
+  <div class="set-sec-title">安全</div>
+  <div class="set-row"><span>修改密码</span><span class="set-val" style="color:var(--muted)">敬请期待</span></div>
+  <div class="set-row"><span>远程访问</span><span class="set-val" style="color:var(--muted)">Tailscale / 局域网 IP 访问(见文档)</span></div>
+</div>
+
+<script>
+(function () {
+  function load() {
+    Promise.all([
+      fetch('/api/version').then(function (r) { return r.json(); }),
+      fetch('/api/monitor/summary').then(function (r) { return r.json(); })
+    ]).then(function (res) {
+      var v = res[0], m = res[1];
+      document.getElementById('st-version').textContent = v.version || '—';
+      document.getElementById('st-commit').textContent = (v.commit || '—').slice(0, 12);
+      document.getElementById('st-build').textContent = v.buildTime || '—';
+      document.getElementById('st-platform').textContent = m.platform || '—';
+      document.getElementById('st-host').textContent = m.hostname || '—';
+      document.getElementById('st-disk').textContent =
+        window.humanSize(m.disk_total_bytes - m.disk_free_bytes) + ' / ' + window.humanSize(m.disk_total_bytes) +
+        ' (' + m.disk_percent.toFixed(1) + '%)';
+    }).catch(function () {
+      document.getElementById('st-version').textContent = '加载失败';
+    });
+  }
+
+  // 主题切换(与 main.js 的 window.setTheme/getTheme 联动)
+  function initTheme() {
+    var seg = document.getElementById('st-theme');
+    if (!seg || !window.setTheme) return;
+    var cur = window.getTheme();
+    seg.querySelectorAll('[data-theme-opt]').forEach(function (b) {
+      b.classList.toggle('active', b.dataset.themeOpt === cur);
+      b.addEventListener('click', function () { window.setTheme(b.dataset.themeOpt); });
+    });
+  }
+
+  load();
+  initTheme();
+})();
+</script>

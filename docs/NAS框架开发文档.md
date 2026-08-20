@@ -3,7 +3,7 @@
 > 版本:0.1(设计稿)
 > 日期:2026-08-19
 > 架构:**管理模块(nasm)+ 主框架(nasd,内建 NAS 必要功能)+ 插件扩展(独立二进制)**
-> 技术栈:Go + Fiber + SQLite + HTMX + Tailwind(daisyUI)
+> 技术栈:Go + Fiber + SQLite + 前端 Vite 工程化(HTMX + 原生 JS + 手写设计系统)
 > 部署环境:Termux(Android 上的 Linux 环境),单进程 + 可选插件进程
 
 ---
@@ -184,7 +184,7 @@ nasm version                   # 版本信息
 |------|------|---------|
 | **认证中心** | 登录/会话/权限/CSRF | SQLite 会话表 + cookie;首次启动生成管理员账号 |
 | **文件管理** | 浏览/上传/下载/删除/重命名/分享链接/搜索 | `os` + `io/fs` 操作 `~/storage` 共享目录;分享链接带短 token |
-| **系统监控** | CPU/内存/温度/电量/磁盘/网络流量 | 读 `/proc` + termux-api(`termux-battery-status` 等);HTMX 每 3s 轮询 |
+| **系统监控** | CPU/内存/温度/电量/磁盘/网络流量 | 读 `/proc` + termux-api(`termux-battery-status` 等);前端轮询看板 |
 | **服务控制** | Samba/SSH/nginx/aria2 等启停、自启、状态 | 进程管理封装(`Svc()` API);基于 termux-services |
 | **备份中心** | 定时备份/rsync 同步/GPG 加密/完成通知 | cron 调度 + `termux-notification` |
 | **插件管理** | 插件安装/卸载/启停/更新/状态(Web UI) | 见 5.3;插件的一切操作仅通过本模块 |
@@ -316,7 +316,7 @@ SDK 内部处理:监听随机端口 → 向 stdout 输出注册 JSON → 等待 
 
 ---
 
-## 7. 内建模块 API 概览(用户通道 :8080)
+## 7. 内建模块 API 概览(用户通道 :7531)
 
 ```
 POST /api/auth/login            # 登录
@@ -369,7 +369,7 @@ GET  /p/<plugin_id>/*           # 插件路由(反代,统一鉴权)
 | 管理通道 | 仅 Unix socket 本机访问 + 管理 token |
 | 插件鉴权 | 用户请求经 nasd 校验后透传 token;插件不暴露公网端口(监听 127.0.0.1) |
 | 分享链接 | 短随机 token,可设过期时间;路径穿越防护(所有路径规范化校验) |
-| 远程访问 | Tailscale / Cloudflare Tunnel 加密隧道,不建议直接暴露 8080 |
+| 远程访问 | Tailscale / Cloudflare Tunnel 加密隧道,不建议直接暴露 7531 |
 | 上传安全 | 大小限制、文件名消毒、MIME 校验 |
 
 ---
@@ -379,8 +379,8 @@ GET  /p/<plugin_id>/*           # 插件路由(反代,统一鉴权)
 | 里程碑 | 内容 | 交付物 |
 |--------|------|--------|
 | **M1** | 项目骨架:go.mod、nasm CLI 框架、nasd 守护骨架、Unix socket 管理通道、start/stop/status | 可运行的双二进制骨架 |
-| **M2** | 认证中心 + 前端壳(登录页/布局/导航/HTMX)+ SQLite | 能登录的空壳 NAS |
-| **M3** | 内建模块:文件管理 + 系统监控(HTMX 轮询看板) | NAS 核心功能可用 |
+| **M2** | 认证中心 + 前端壳(登录页/布局/导航)+ SQLite | 能登录的空壳 NAS |
+| **M3** | 内建模块:文件管理 + 系统监控(轮询看板) | NAS 核心功能可用 |
 | **M4** | 插件系统:管理器(安装/卸载/启停/更新 API)+ 注册协议 + 反代 + 懒加载 + download 插件验证 | 插件全链路跑通,Web UI 插件管理页可用 |
 | **M5** | 服务控制 + 备份中心 + 安全加固 | 完整 NAS |
 | **M6** | nasm update 更新流程 + 插件市场 + PWA + Tailscale 集成 | 可日常使用 |
@@ -421,4 +421,4 @@ mkdir -p $PREFIX/var/service/nasd/log
 | **职责单点** | **nasm 只管理主框架生命周期;插件全权由 nasd 控制(Web UI)** | 单一管理入口,避免两套命令/两处状态,操作一致性好 |
 | 管理通道 | Unix socket(仅本机),仅暴露生命周期方法 | 管理操作不暴露公网;插件操作走用户通道(需登录) |
 | 插件内存策略 | 懒加载 + 空闲回收 | 常驻内存不随插件数量增长 |
-| 通信协议 | 用户通道 HTTP :8080 + 管理 JSON-RPC socket | 两条通道职责严格分离 |
+| 通信协议 | 用户通道 HTTP :7531 + 管理 JSON-RPC socket | 两条通道职责严格分离 |

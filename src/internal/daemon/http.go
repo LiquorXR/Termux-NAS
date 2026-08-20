@@ -49,20 +49,21 @@ func (d *Daemon) buildHTTP() (*fiber.App, error) {
 	})
 
 	// --- M2 认证中心 ---
-	// 预认证接口(无需会话):首次设置 / 登录 / 登出
+	// 预认证接口(无需会话):状态 / 首次设置 / 登录 / 登出
+	app.Get("/api/auth/status", d.auth.HandleStatus)
 	app.Post("/api/auth/setup", checkSameOrigin, d.auth.HandleSetup)
 	app.Post("/api/auth/login", checkSameOrigin, d.auth.HandleLogin)
 	app.Post("/api/auth/logout", checkSameOrigin, d.auth.OptionalAuth, d.auth.HandleLogout)
 	// 需会话接口
 	app.Get("/api/auth/me", d.auth.RequireAuth, d.auth.HandleMe)
 
-	// --- 页面 ---
+	// --- 页面(SPA 壳,前端按登录态渲染登录/设置/主界面) ---
 	// 登录页:已登录则直接进入应用壳
 	app.Get("/login", func(c *fiber.Ctx) error {
 		if d.auth.SessionUser(c) != nil {
 			return c.Redirect("/")
 		}
-		return servePage(c, "login.html")
+		return servePage(c, "index.html")
 	})
 	// 首次设置页:系统已初始化后不可访问
 	app.Get("/setup", func(c *fiber.Ctx) error {
@@ -76,11 +77,11 @@ func (d *Daemon) buildHTTP() (*fiber.App, error) {
 		if d.auth.SessionUser(c) != nil {
 			return c.Redirect("/")
 		}
-		return servePage(c, "setup.html")
+		return servePage(c, "index.html")
 	})
 	// 应用壳(需登录)
 	app.Get("/", d.auth.PageAuth, func(c *fiber.Ctx) error {
-		return servePage(c, "app.html")
+		return servePage(c, "index.html")
 	})
 
 	// --- M3 文件管理 ---
@@ -97,33 +98,6 @@ func (d *Daemon) buildHTTP() (*fiber.App, error) {
 
 	// --- M3 系统监控 ---
 	app.Get("/api/monitor/summary", d.auth.RequireAuth, d.monitorSummary)
-
-	// --- 前端片段(HTMX,需登录) ---
-	app.Get("/partials/files", d.auth.RequireAuth, d.files.HandlePartial)
-	app.Get("/partials/monitor", d.auth.RequireAuth, d.monitorPartial)
-
-	// 前端壳占位片段(HTMX 局部加载,需登录)
-	app.Get("/partials/plugins", d.auth.RequireAuth, func(c *fiber.Ctx) error {
-		return servePage(c, "partials/plugins.html")
-	})
-	app.Get("/partials/market", d.auth.RequireAuth, func(c *fiber.Ctx) error {
-		return servePage(c, "partials/market.html")
-	})
-	app.Get("/partials/services", d.auth.RequireAuth, func(c *fiber.Ctx) error {
-		return servePage(c, "partials/services.html")
-	})
-	app.Get("/partials/backup", d.auth.RequireAuth, func(c *fiber.Ctx) error {
-		return servePage(c, "partials/backup.html")
-	})
-	app.Get("/partials/settings", d.auth.RequireAuth, func(c *fiber.Ctx) error {
-		return servePage(c, "partials/settings.html")
-	})
-
-	// 内建模块路由占位(M4+ 实现):
-	// /api/svc/*   服务控制
-	// /api/backup/* 备份中心
-	// /api/plugins/* 插件管理器
-	// /p/<id>/*   插件反代(M4)
 
 	// --- M5 服务控制 ---
 	app.Get("/api/svc/list", d.auth.RequireAuth, d.svcList)
@@ -157,8 +131,8 @@ func (d *Daemon) buildHTTP() (*fiber.App, error) {
 	app.All("/p/:id/*", d.auth.RequireAuth, d.pluginProxy)
 	app.All("/p/:id", d.auth.RequireAuth, d.pluginProxy)
 
-	// 前端静态资源(嵌入二进制)
-	sub, err := fs.Sub(webui.Static, "static")
+	// 前端静态资源(嵌入二进制构建产物)
+	sub, err := fs.Sub(webui.Static, "dist")
 	if err != nil {
 		return nil, err
 	}
@@ -175,7 +149,7 @@ func (d *Daemon) buildHTTP() (*fiber.App, error) {
 
 // servePage 从嵌入资源输出页面(设置 text/html)。
 func servePage(c *fiber.Ctx, name string) error {
-	b, err := webui.Static.ReadFile("static/" + name)
+	b, err := webui.Static.ReadFile("dist/" + name)
 	if err != nil {
 		return c.Status(fiber.StatusNotFound).SendString("页面不存在")
 	}
