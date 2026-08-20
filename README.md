@@ -2,7 +2,8 @@
 
 在 Termux(Android 上的 Linux 环境)中运行的**可插拔移动端 NAS**。
 
-- **架构**:管理模块 `nasm`(CLI)+ 主框架 `nasd`(常驻守护)+ 插件(独立二进制)
+- **架构**:单一主框架守护进程 `nasd` + 插件(独立二进制);仓库根脚本 `nas.sh`
+  全周期管理 nasd 的生命周期(安装/更新/启停/状态/日志/卸载)
 - **技术栈**:Go + Fiber + SQLite(WAL)+ HTMX + Tailwind(daisyUI)
 - **部署环境**:Termux,无 root、高位端口、termux-services 守护;**一键脚本 `nas.sh`
   安装/更新/启停,无需手机安装 Go**
@@ -14,13 +15,11 @@
 ~/nas/                          # 单一部署根(备份 = 拷贝目录)
 ├── nas.sh                      # ★ 一键部署/更新/管理脚本(Termux 首选,无需 Go 工具链)
 ├── src/                        # Go 源码(本仓库)
-│   ├── cmd/
-│   │   ├── nasm/               # 管理 CLI(只管理 nasd 生命周期)
-│   │   └── nasd/               # 主框架守护进程
+│   ├── cmd/nasd/               # 主框架守护进程(单一二进制)
 │   ├── internal/
 │   │   ├── config/             # 部署根解析 + data/config.json
 │   │   ├── daemon/             # nasd 核心:HTTP/DB/插件扫描/生命周期
-│   │   ├── mgmt/               # 管理通道 JSON-RPC(Unix socket,跨平台适配)
+│   │   ├── lock/               # 单实例锁(flock / Windows 互斥量)
 │   │   ├── version/            # 版本信息(构建时注入)
 │   │   └── webui/              # 嵌入前端静态资源(单二进制)
 │   ├── scripts/build.sh        # 构建脚本(host / android 交叉编译)
@@ -28,10 +27,10 @@
 │   ├── termux-service/         # runit 服务脚本模板
 │   └── Makefile
 ├── .github/workflows/          # CI(ci.yml)+ 发布流水线(release.yml)
-├── bin/                        # 构建产物或 nas.sh 下载的二进制(nasm / nasd)
+├── bin/                        # 构建产物或 nas.sh 下载的二进制(nasd)
 ├── plugins/                    # 插件二进制(M4)
 ├── data/                       # nas.db / config.json / logs/(运行时生成)
-└── run/                        # nas.sock 管理 socket(运行时生成)
+└── run/                        # 单实例锁 run/nas.lock(运行时生成)
 ```
 
 ## 快速开始
@@ -40,15 +39,17 @@
 
 ```bash
 cd src
-make build          # 构建到 ../bin/
-NAS_ROOT=/tmp/nas ./bin/nasd -root /tmp/nas   # 启动守护进程(终端 A)
-./bin/nasm status   # 查询状态(终端 B)
-./bin/nasm log -n 20
-./bin/nasm stop
+make build          # 构建 nasd 到 ../bin/
+# 终端 A:启动守护进程(Ctrl+C 即优雅停止)
+NAS_ROOT=/tmp/nas ./bin/nasd -root /tmp/nas
+# 终端 B:用 nas.sh 管理生命周期(Linux/macOS;Windows 上直接 Ctrl+C)
+bash ../nas.sh status   # 或: ../bin/nasd -version
+bash ../nas.sh log -n 20
+bash ../nas.sh stop
 ```
 
-> 开发环境(Windows)下管理通道自动退化为回环 TCP(地址写入 `run/nas.addr`);
-> 生产环境(Termux)使用 Unix socket。无需额外配置。
+> 生命周期由 `nas.sh` 统一管理(SIGTERM 优雅停止 / HTTP 健康探活 / 日志文件直读),
+> 不再需要任何 Go 管理 CLI 或本地管理 socket。
 
 ### Termux 部署(推荐:一键脚本,无需装 Go)
 
@@ -65,7 +66,7 @@ bash nas.sh start               # 启动 nasd
 
 浏览器访问 `http://<手机局域网IP>:7531`。
 
-> 首次启动 nasd 自动生成 `data/config.json`(含管理 token),随后按 Web UI
+> 首次启动 nasd 自动生成 `data/config.json`(默认端口 7531),随后按 Web UI
 > 引导创建管理员账号即可。
 
 **常用命令**
@@ -75,60 +76,60 @@ bash nas.sh start               # 启动 nasd
 | `bash nas.sh install [--service]` | 安装/修复(可选注册开机自启) |
 | `bash nas.sh update [-f] [版本]` | 更新到最新(或指定 `v<版本>`),自动校验/备份/回滚 |
 | `bash nas.sh start` / `stop` / `restart` | 启动 / 优雅停止 / 重启 |
-| `bash nas.sh status [-json]` / `log [-n N]` | 状态 / 查看日志尾部 |
+| `bash nas.sh status` / `log [-n N]` | 状态 / 查看日志尾部 |
 | `bash nas.sh doctor` | 环境体检(二进制/目录/健康端口/磁盘) |
 | `bash nas.sh uninstall [-y]` | 卸载(默认只打印计划,需 `-y` 才删除数据) |
 | `bash nas.sh self-update` | 更新 nas.sh 脚本自身 |
 
 **版本发布与更新**:推送 `v*` 标签即触发 CI 自动交叉编译并发布
-`nasm-android-arm64`、`nasd-android-arm64`、`sha256sums.txt` 三个资产。
+`nasd-android-arm64` 与 `sha256sums.txt` 两个资产。
 `bash nas.sh update` 默认更新到最新 Release;指定版本如 `bash nas.sh update 0.2.0`。
-更新全程:下载 → SHA256 校验 → 优雅停机 → 原子替换(旧版保留 `.bak`)→
-重启 → 失败自动回滚。
+更新全程:下载 → SHA256 校验 → 优雅停止(SIGTERM)→ 原子替换(旧版保留 `.bak`)→
+重启并健康检查 → 失败自动回滚。
 
 ### Termux 源码构建(贡献者/离线回退)
 
-若需自行构建(如无网络或定制),沿用旧流程(须先 `pkg install golang termux-services termux-api`):
+若需自行构建(如无网络或定制),须先 `pkg install golang`:
 
 ```bash
 cd ~/nas/src && make android        # 交叉编译 android/arm64 静态二进制(含前端)
-# 产物在 ../bin/,再按上面 nas.sh 的目录约定放入 bin/ 即可
-# 注册 runit 服务(详见 termux-service/nasd-run.sh 头注释)
+# 产物在 ../bin/nasd,再用 nas.sh 后续流程管理即可
 mkdir -p $PREFIX/var/service/nasd/log
 cp termux-service/nasd-run.sh $PREFIX/var/service/nasd/run
 chmod +x $PREFIX/var/service/nasd/run
 sv-enable nasd                      # 开机自启(Termux:Boot)
-nasm status                         # 或直接: sv start nasd
+sv start nasd                       # 或: bash nas.sh start
 ```
 
-## 两条通信通道
+## 通信与生命周期管理
 
-| 通道 | 路径 | 用途 | 暴露面 |
-|------|------|------|--------|
-| 用户通道 | `:7531` HTTP | Web UI / API | 局域网 / Tailscale |
-| 管理通道 | `run/nas.sock`(Unix socket) | nasm ↔ nasd 生命周期指令 | 仅本机 |
+| 通道/方式 | 用途 | 暴露面 |
+|------|------|--------|
+| 用户通道 `:7531` HTTP | Web UI / API(需登录) | 局域网 / Tailscale |
+| `nas.sh`(SIGTERM 优雅停止) | 生命周期控制:启停/重启/更新 | 仅本机(Termux 命令行) |
+| `nas.sh`(`/health` + 日志文件直读) | 探活 / 状态 / 日志 | 仅本机 |
 
-管理通道为 JSON-RPC,当前方法:`daemon.status` / `daemon.stop` / `daemon.enterUpdate` / `log.tail`。
-**插件操作不在此通道**——统一走用户通道 HTTP(Web UI「插件管理」页,需登录)。
+主程序只有一个二进制 `nasd`;不保留任何本地管理 socket 或管理 CLI。
+插件操作统一走用户通道 HTTP(Web UI「插件管理」页,需登录)。
 
 ## 里程碑
 
 | 里程碑 | 内容 | 状态 |
 |--------|------|------|
-| **M1** | 项目骨架:go.mod、nasm CLI、nasd 守护、Unix socket 管理通道、start/stop/status | ✅ |
+| **M1** | 项目骨架:nasd 守护、生命周期管理(nas.sh)、start/stop/status | ✅ |
 | **M2** | 认证中心 + 前端壳(登录页/布局/HTMX)+ SQLite 会话 | ✅ |
 | **M3** | 内建模块:文件管理 + 系统监控(HTMX 轮询看板) | ✅ |
 | **M4** | 插件系统:管理器 API + 注册协议 + 反代 + 懒加载 + download 插件 | ✅ |
 | **M5** | 服务控制 + 备份中心 + 安全加固 | ✅ |
-| **M6** | nasm update 更新流程 + 插件市场 + PWA + Tailscale 集成 | ✅ |
+| **M6** | 原子更新流程 + 插件市场 + PWA + Tailscale 集成 | ✅ |
 
-## M6 更新流程 + 插件市场 + PWA(已实现)
+## M6 原子更新 + 插件市场 + PWA(已实现)
 
-### nasm update 原子更新
-- `nasm update [url|file]`:下载 → SHA256 校验 → `daemon.enterUpdate` 优雅停止 → 原子替换(旧版 .bak 备份) → 重启 → 失败回滚
-- `nasm self-update`:同流程更新 nasm 自身
-- `nasm update -f`:跳过版本检查强制更新;版本相同自动跳过
-- 修复:管理通道在途连接导致的进程退出死锁(Server.Close 不再等待连接)
+### 原子更新(nas.sh update)
+- 单二进制 `nasd`;`bash nas.sh update`:下载 → SHA256 校验 → SIGTERM 优雅停止
+  → 原子替换(旧版 `.bak` 备份)→ 重启 + 健康检查 → 失败自动回滚
+- `update -f`:跳过版本检查强制更新;版本相同自动跳过
+- 生命周期由 `nas.sh` 全周期管理(SIGTERM/health/日志直读),不再依赖管理 CLI
 
 ### 插件市场
 - `internal/market`:内嵌官方市场索引(go:embed),download/alist/media/photos
@@ -199,9 +200,9 @@ fmt.Printf(`{"id":"download","name":"下载中心","version":"1.0.0",
 ## 关键设计决策
 
 - **SQLite 用 `modernc.org/sqlite`**(纯 Go 驱动)——`CGO_ENABLED=0` 静态编译的关键,Termux 无 C 编译链也能构建
-- **管理通道跨平台**:Unix socket(Linux/Termux)+ 回环 TCP(Windows 开发调试),build tag 自动切换
+- **生命周期由 `nas.sh` 全周期管理**:SIGTERM 优雅停止 + HTTP `/health` 探活 + 日志文件直读,无本地管理 socket、无管理 CLI
 - **前端静态资源 `go:embed`** 进 nasd,单二进制自带全部界面
-- **职责单点**:nasm 只管理 nasd 生命周期;插件全权由 nasd 控制(Web UI)
+- **职责单点**:nas.sh 只管理 nasd 生命周期;插件全权由 nasd 控制(Web UI)
 
 ## 文档
 

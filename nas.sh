@@ -2,13 +2,19 @@
 # =============================================================================
 # nas.sh — Termux NAS 一键部署与管理脚本(仓库根目录)
 #
-# 功能:自动创建目录结构、从 GitHub Releases 拉取预编译二进制(android/arm64)、
-#       校验 SHA256、赋予可执行权限,并管理主程序 nasm/nasd 的
-#       安装 / 更新 / 启动 / 停止 / 重启 / 状态 / 日志 / 卸载。
+# 主程序为单一二进制 nasd;本脚本全周期管理其生命周期:
+#   安装 / 更新 / 启动 / 停止 / 重启 / 状态 / 日志 / 卸载。
+#
+# 管理方式(无需任何 Go 管理工具):
+#   - 启动:runit(sv)优先,否则后台 nohup 拉起
+#   - 停止:SIGTERM 优雅停止(等进程退出,超时再 SIGKILL)
+#   - 探活:HTTP /health(endpoint)+ 单实例锁 pid(run/nas.lock)
+#   - 日志:直读 data/logs/nasd.log 尾部
+#   - 更新:下载→SHA256 校验→优雅停止→原子替换(.bak)→重启→失败回滚
 #
 # 用法:
 #   bash nas.sh install [--service]  # 安装(可选注册 runit 开机自启)
-#   bash nas.sh update [-f] [版本]    # 更新到最新(或指定 v<版本>):校验→优雅停机→替换→重启→回滚
+#   bash nas.sh update [-f] [版本]    # 更新到最新(或指定 v<版本>)
 #   bash nas.sh start | stop | restart | status [-json] | log [-n N]
 #   bash nas.sh doctor                # 环境体检
 #   bash nas.sh uninstall [-y]        # 卸载(默认只打印计划,需 -y 才删除数据)
@@ -20,16 +26,16 @@
 #   NAS_REPO      GitHub 仓库,默认 LiquorXR/Termux-NAS
 #   NAS_DIST_URL  资产下载基地址(默认按 GitHub Releases 构造;
 #                 镜像/本地测试时可指向自定义 URL/file folder)
+#   NAS_ARCH      架构覆盖(默认按 uname -m 检测;开发机测试可设 arm64)
 # =============================================================================
 set -euo pipefail
 
-NAS_SCRIPT_VERSION="1.0.0"
+NAS_SCRIPT_VERSION="2.0.0"
 NAS_ROOT="${NAS_ROOT:-$HOME/nas}"
 NAS_REPO="${NAS_REPO:-LiquorXR/Termux-NAS}"
 PORT_DEFAULT=7531
 
 # 资产命名(与 .github/workflows/release.yml 输出一致,勿改)
-ASSET_NASM="nasm-android-arm64"
 ASSET_NASD="nasd-android-arm64"
 ASSET_SUMS="sha256sums.txt"
 
@@ -37,8 +43,8 @@ ASSET_SUMS="sha256sums.txt"
 NAS_TMP=""
 NAS_LOCKDIR=""
 _nas_exit() {
-  [ -n "$NAS_TMP" ]      && rm -rf "$NAS_TMP"
-  [ -n "$NAS_LOCKDIR" ]  && rmdir "$NAS_LOCKDIR" 2>/dev/null || true
+  [ -n "$NAS_TMP" ]     && rm -rf "$NAS_TMP"
+  [ -n "$NAS_LOCKDIR" ] && rmdir "$NAS_LOCKDIR" 2>/dev/null || true
 }
 trap _nas_exit EXIT
 
@@ -51,7 +57,7 @@ die()  { err "$*"; }
 # ---------------- 基础检查 ----------------
 require_cmds() {
   local missing=() c
-  for c in curl sha256sum uname mktemp awk grep sed; do
+  for c in curl sha256sum uname mktemp awk grep sed tail head tr; do
     command -v "$c" >/dev/null 2>&1 || missing+=("$c")
   done
   if [ "${#missing[@]}" -gt 0 ]; then
@@ -60,12 +66,10 @@ require_cmds() {
 }
 
 # 是否真实 Linux 系(含 Termux: uname -s 返回 Linux)。
-# 用于区分“必须能执行 Linux 二进制”(Lin/unux/Android)与
-# 仅在开发机上做文件机制测试(如 Windows Git Bash,无法运行 linux 产物)。
+# 用于区分“必须能执行 Linux 二进制”与仅做文件机制测试(如 Windows Git Bash)。
 is_linux() { [ "$(uname -s)" = "Linux" ]; }
 
 detect_arch() {
-  # NAS_ARCH 可显式覆盖(开发机/分叉仓库测试用): 如 NAS_ARCH=arm64 bash nas.sh ...
   local m="${NAS_ARCH:-$(uname -m)}"
   case "$m" in
     aarch64|arm64) NAS_ARCH="arm64" ;;
@@ -76,8 +80,31 @@ detect_arch() {
   esac
 }
 
+# ---------------- 路径与端口 ----------------
+bin_path()    { printf '%s/bin/nasd' "$NAS_ROOT"; }
+nasd_bin()    { bin_path; }
+log_path()    { printf '%s/data/logs/nasd.log' "$NAS_ROOT"; }
+lock_path()   { printf '%s/run/nas.lock' "$NAS_ROOT"; }
+
+# 从 data/config.json 读取端口;未生成时用默认 7531
+config_port() {
+  local p
+  p="$(sed -n 's/.*"port"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p' \
+       "$NAS_ROOT/data/config.json" 2>/dev/null | head -n1)"
+  printf '%s' "${p:-$PORT_DEFAULT}"
+}
+
+# ---------------- 目录结构 ----------------
+# 与 internal/config 的部署根布局一致:bin plugins data/logs run files
+ensure_dirs() {
+  mkdir -p "$NAS_ROOT"/bin \
+           "$NAS_ROOT"/plugins \
+           "$NAS_ROOT"/data/logs \
+           "$NAS_ROOT"/run \
+           "$NAS_ROOT"/files
+}
+
 # ---------------- 下载与校验 ----------------
-# 构造资产下载基地址;channel 为 latest 或语义化版本号(不含 v)
 release_base_url() {
   local channel="$1"
   if [ -n "${NAS_DIST_URL:-}" ]; then
@@ -93,7 +120,7 @@ release_base_url() {
 
 download_assets() {
   local base="$1" tmp="$2" url a
-  for a in "$ASSET_NASM" "$ASSET_NASD" "$ASSET_SUMS"; do
+  for a in "$ASSET_NASD" "$ASSET_SUMS"; do
     url="$base/$a"
     info "下载 $a"
     curl -fL --retry 3 --connect-timeout 20 --max-time 180 -o "$tmp/$a" "$url" \
@@ -101,7 +128,6 @@ download_assets() {
   done
 }
 
-# 严格校验:sha256sum -c 要求校验和文件列出的每个资产都存在且匹配
 verify_assets() {
   local tmp="$1"
   ( cd "$tmp" && sha256sum -c sha256sums.txt ) \
@@ -110,42 +136,43 @@ verify_assets() {
   info "SHA256 校验通过"
 }
 
-# 从校验和文件取出单个资产的哈希
 hash_for() {
   local tmp="$1" name="$2"
   awk -v n="$name" '$2 == n { print $1; exit }' "$tmp/sha256sums.txt"
 }
 
-# 探测二进制版本号(语义化版本第一个字段)。
-# nasd 用 -version;nasm 用 version 子命令(输出首字段为 "nasm",取第二字段)。
+# 探测 nasd 版本号(-version,语义化版本第一个字段)。
+# 容错:无法执行时返回空串且不报错(非 Linux 开发环境无法运行 linux 产物);
+# “必须能执行”的硬校验由调用方按 is_linux 显式执行。
 probe_version() {
-  local bin="$1" line v
-  line="$("$bin" -version 2>/dev/null || "$bin" version 2>/dev/null || true)"
-  v="$(printf '%s' "$line" | awk '{ print $1 }')"
-  if [ "$v" = "nasm" ]; then v="$(printf '%s' "$line" | awk '{ print $2 }')"; fi
-  printf '%s' "$v"
+  local bin="$1" line
+  line="$("$bin" -version 2>/dev/null || true)"
+  printf '%s' "$line" | awk '{ print $1 }'
 }
 
-bin_path() { printf '%s/bin/%s' "$NAS_ROOT" "$1"; }
-nasm_bin() { bin_path nasm; }
-nasd_bin() { bin_path nasd; }
-
-# ---------------- 目录结构 ----------------
-# 与 internal/config 的部署根布局一致:bin plugins data/logs run files
-ensure_dirs() {
-  mkdir -p "$NAS_ROOT"/bin \
-           "$NAS_ROOT"/plugins \
-           "$NAS_ROOT"/data/logs \
-           "$NAS_ROOT"/run \
-           "$NAS_ROOT"/files
+# ---------------- 运行状态:健康探活 + pid ----------------
+health_up() {
+  curl -sf -o /dev/null --max-time 3 "http://127.0.0.1:$(config_port)/health"
 }
 
-# ---------------- 运行状态 ----------------
+# 返回运行中 nasd 的 pid(每行一个)
+nasd_pids() {
+  local lp=""
+  # 优先:单实例锁文件中的 pid(unix flock 由 nasd 写入)
+  if [ -s "$(lock_path)" ]; then
+    lp="$(head -n1 "$(lock_path)" 2>/dev/null || true)"
+    case "$lp" in ''|*[!0-9]*) lp="" ;; esac
+    if [ -n "$lp" ] && kill -0 "$lp" 2>/dev/null; then
+      printf '%s\n' "$lp"
+      return
+    fi
+  fi
+  # 兜底:按命令行匹配(锚定二进制路径开头,排除外壳自身)
+  pgrep -f "^$(nasd_bin)" 2>/dev/null || true
+}
+
 is_running() {
-  local out json
-  out="$("$NAS_ROOT/bin/nasm" status -json 2>/dev/null)" || return 1
-  json="$(printf '%s' "$out" | sed -n 's/.*"running"[[:space:]]*:[[:space:]]*\(true\|false\).*/\1/p')"
-  [ "$json" = "true" ]
+  health_up || [ -n "$(nasd_pids)" ]
 }
 
 # ---------------- 安装 ----------------
@@ -164,10 +191,10 @@ cmd_install() {
   local base; base="$(release_base_url latest)"
   download_assets "$base" "$tmp"
   verify_assets "$tmp"
-  chmod +x "$tmp/$ASSET_NASM" "$tmp/$ASSET_NASD"
+  chmod +x "$tmp/$ASSET_NASD"
 
   local need_install=1
-  if [ -x "$(nasd_bin)" ]; then
+  if [ -s "$(nasd_bin)" ] && is_linux; then
     local old new
     old="$(probe_version "$(nasd_bin)")"
     new="$(probe_version "$tmp/$ASSET_NASD")"
@@ -178,23 +205,17 @@ cmd_install() {
   fi
 
   if [ "$need_install" = "1" ]; then
-    local pair name asset
-    for pair in "nasd:$ASSET_NASD" "nasm:$ASSET_NASM"; do
-      name="${pair%%:*}"; asset="${pair##*:}"
-      if [ -f "$(bin_path "$name")" ]; then
-        info "保留旧版备份: ${name}.bak"
-        mv -f "$(bin_path "$name")" "$(bin_path "$name").bak"
-      fi
-      mv -f "$tmp/$asset" "$(bin_path "$name")"
-      chmod +x "$(bin_path "$name")"
-    done
-
-    # 冒烟验证:新二进制必须可执行并输出版本
-    probe_version "$(nasd_bin)" >/dev/null || die "安装的 nasd 无法执行,请检查产物"
-    probe_version "$(nasm_bin)" >/dev/null || die "安装的 nasm 无法执行,请检查产物"
-    local vd vn
-    vd="$(probe_version "$(nasd_bin)")"; vn="$(probe_version "$(nasm_bin)")"
-    [ -n "$vd$vn" ] && info "二进制已验证(nasd v${vd} / nasm v${vn})"
+    if [ -f "$(nasd_bin)" ]; then
+      info "保留旧版备份: nasd.bak"
+      mv -f "$(nasd_bin)" "$(nasd_bin).bak"
+    fi
+    mv -f "$tmp/$ASSET_NASD" "$(nasd_bin)"
+    chmod +x "$(nasd_bin)"
+    if is_linux && [ -z "$(probe_version "$(nasd_bin)")" ]; then
+      die "安装的 nasd 无法执行,请检查产物"
+    fi
+    local vd; vd="$(probe_version "$(nasd_bin)")"
+    [ -n "$vd" ] && info "二进制已验证(nasd v${vd})"
   fi
 
   if [ "$service" = "1" ]; then
@@ -202,8 +223,8 @@ cmd_install() {
   fi
 
   info "安装完成。部署根: $NAS_ROOT"
-  info "下一步: bash nas.sh start;浏览器访问 http://<本机局域网IP>:$PORT_DEFAULT"
-  info "提示: 首次启动 nasd 会自动生成 data/config.json(含管理 token)。"
+  info "下一步: bash nas.sh start;浏览器访问 http://<本机局域网IP>:$(config_port)"
+  info "提示: 首次启动 nasd 自动生成 data/config.json(默认端口 $PORT_DEFAULT)。"
 }
 
 # runit 服务注册(Termux:termux-services);依赖 $PREFIX
@@ -231,6 +252,111 @@ register_service() {
   fi
 }
 
+# ---------------- 生命周期 ----------------
+# 优雅停止:SIGTERM → 等待进程退出 → 超时 SIGKILL
+stop_nasd() {
+  local pids remaining i
+  pids="$(nasd_pids)"
+  if [ -z "$pids" ]; then
+    return 0
+  fi
+  info "优雅停止 nasd($(printf '%s' "$pids" | tr '\n' ' '))..."
+  for p in $pids; do
+    kill -TERM "$p" 2>/dev/null || true
+  done
+  for i in $(seq 1 120); do # 最长约 12s
+    if [ -z "$(nasd_pids)" ]; then
+      info "nasd 已停止"
+      return 0
+    fi
+    sleep 0.1
+  done
+  remaining="$(nasd_pids)"
+  warn "优雅停止超时,强制结束: $(printf '%s' "$remaining" | tr '\n' ' ')"
+  for p in $remaining; do
+    kill -KILL "$p" 2>/dev/null || true
+  done
+  sleep 1
+}
+
+# 等待健康就绪;超时返回非零
+wait_ready() {
+  local t="${1:-30}" i
+  for i in $(seq 1 $((t * 2))); do
+    if health_up; then return 0; fi
+    sleep 0.5
+  done
+  return 1
+}
+
+start_nasd() {
+  ensure_dirs
+  if is_running; then
+    info "nasd 已在运行"
+    return 0
+  fi
+
+  # runit 优先(install --service 注册过)
+  if [ -n "${PREFIX:-}" ] && [ -x "$PREFIX/var/service/nasd/run" ] \
+     && command -v sv >/dev/null 2>&1; then
+    if sv start nasd 2>/dev/null && wait_ready 30; then
+      info "nasd 已启动(runit)"
+      return 0
+    fi
+    warn "sv start 未就绪,退回后台直启"
+  fi
+
+  # 后台拉起(nasd 自身写 data/logs/nasd.log)
+  info "后台启动 nasd..."
+  if command -v nohup >/dev/null 2>&1; then
+    nohup "$(nasd_bin)" -root "$NAS_ROOT" >/dev/null 2>&1 &
+  else
+    "$(nasd_bin)" -root "$NAS_ROOT" >/dev/null 2>&1 &
+  fi
+  if wait_ready 30; then
+    info "nasd 已启动(pid $(nasd_pids | head -n1))"
+  else
+    err "nasd 启动超时(健康检查未通过),请查看日志: $(log_path)"
+  fi
+}
+
+cmd_start()   { [ -s "$(nasd_bin)" ] || die "未安装 nasd,请先 bash nas.sh install"; start_nasd; }
+cmd_stop()    { [ -s "$(nasd_bin)" ] || { info "nasd 未安装,无需停止"; return; }; stop_nasd; }
+cmd_restart() { cmd_stop; cmd_start; }
+
+cmd_status() {
+  local port h v up pid
+  port="$(config_port)"
+  if health_up; then
+    h="$(curl -sf --max-time 3 "http://127.0.0.1:$port/health")"
+    v="$(printf '%s' "$h" | sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')"
+    up="$(printf '%s' "$h" | sed -n 's/.*"uptime"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p')"
+    pid="$(printf '%s' "$h" | sed -n 's/.*"pid"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p')"
+    echo "nasd:      运行中"
+    echo "版本:      $v"
+    echo "PID:       $pid"
+    echo "Uptime:    ${up}s"
+    echo "端口:      $port"
+  else
+    echo "nasd: 未运行"
+    if [ -s "$(nasd_bin)" ] && is_linux; then
+      echo "已安装: v$(probe_version "$(nasd_bin)")(bash nas.sh start 启动)"
+    fi
+  fi
+}
+
+cmd_log() {
+  [ -s "$(nasd_bin)" ] || die "未安装 nasd,请先 bash nas.sh install"
+  local n=50
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      -n) n="${2:-50}"; shift 2 ;;
+      *) shift ;;
+    esac
+  done
+  tail -n "$n" "$(log_path)" 2>/dev/null || echo "(日志文件尚未生成)"
+}
+
 # ---------------- 更新 ----------------
 cmd_update() {
   local channel="latest" force=0 a
@@ -241,9 +367,9 @@ cmd_update() {
       *)          channel="$a" ;;
     esac
   done
-  channel="${channel#v}" # 容忍用户传 v1.2.3
+  channel="${channel#v}"
 
-  [ -s "$(nasm_bin)" ] || die "未安装 nasm,请先 bash nas.sh install"
+  [ -s "$(nasd_bin)" ] || die "未安装 nasd,请先 bash nas.sh install"
   ensure_dirs
 
   local tmp; tmp="$(mktemp -d)"; NAS_TMP="$tmp"
@@ -251,17 +377,14 @@ cmd_update() {
   local base; base="$(release_base_url "$channel")"
   download_assets "$base" "$tmp"
   verify_assets "$tmp"
-  chmod +x "$tmp/$ASSET_NASM" "$tmp/$ASSET_NASD"
+  chmod +x "$tmp/$ASSET_NASD"
 
-  local new_ver
+  local new_ver old_ver=""
   new_ver="$(probe_version "$tmp/$ASSET_NASD")"
-  # 真实 Linux(含 Termux)下,下载产物必须能执行(防损坏/架构不符);
-  # 非 Linux 开发环境无法运行 linux 产物,跳过该检查仅做文件替换。
+  # 真实 Linux(含 Termux)下,下载产物必须能执行(防损坏/架构不符)
   if [ -z "$new_ver" ] && is_linux; then
     die "下载的 nasd 无法执行(产物损坏或架构不符),已中止"
   fi
-
-  local old_ver=""
   if [ -s "$(nasd_bin)" ]; then old_ver="$(probe_version "$(nasd_bin)")"; fi
 
   if [ "$force" != "1" ] && [ -n "$new_ver" ] && [ -n "$old_ver" ] && [ "$new_ver" = "$old_ver" ]; then
@@ -271,84 +394,58 @@ cmd_update() {
   fi
 
   info "版本变更: ${old_ver:-未安装} → $new_ver"
-  local hash_nasd hash_nasm
-  hash_nasd="$(hash_for "$tmp" "$ASSET_NASD")"
-  hash_nasm="$(hash_for "$tmp" "$ASSET_NASM")"
 
+  local was_running=0
   if is_running; then
-    # 运行中:复用 nasm 内建更新(nasm update 负责版本比对/enterUpdate 优雅停机/
-    # 原子替换(.bak)/重启与失败自动回滚;先更 nasd 后更 nasm,保留旧 nasm 作回滚工具)
-    info "nasd 运行中,走优雅更新通道(nasm update)..."
-    if [ "$channel" = "latest" ]; then
-      "$(nasm_bin)" update -sha256 "$hash_nasd" "$tmp/$ASSET_NASD" \
-        || die "nasd 更新失败(nasm 已自动回滚,请用 bash nas.sh log 查看详情)"
-    else
-      # 指定版本:传入期望版本号,nasm 会校验下载产物版本一致
-      "$(nasm_bin)" update -sha256 "$hash_nasd" "$tmp/$ASSET_NASD" "$channel" \
-        || die "nasd 更新失败(nasm 已自动回滚,请用 bash nas.sh log 查看详情)"
-    fi
-
-    "$(nasm_bin)" self-update -sha256 "$hash_nasm" "$tmp/$ASSET_NASM" || true
-    if probe_version "$(nasm_bin)" >/dev/null 2>&1; then
-      info "nasm 更新完成: v$(probe_version "$(nasm_bin)")"
-    else
-      warn "新版 nasm 无法执行,从 .bak 回滚"
-      if [ -f "$(nasm_bin).bak" ]; then mv -f "$(nasm_bin).bak" "$(nasm_bin)"; fi
-      chmod +x "$(nasm_bin)"
-    fi
-    info "nasd 更新完成: v$(probe_version "$(nasd_bin)")"
+    was_running=1
+    # 运行中:先优雅停止,确保旧进程退出、单实例锁释放后再替换二进制
+    stop_nasd
   else
-    # 未运行:管理通道不可用,直接替换(无进程占用二进制,安全)
     info "nasd 未运行,直接替换二进制..."
-    local pair name asset
-    for pair in "nasd:$ASSET_NASD" "nasm:$ASSET_NASM"; do
-      name="${pair%%:*}"; asset="${pair##*:}"
-      if [ -f "$(bin_path "$name")" ]; then
-        mv -f "$(bin_path "$name")" "$(bin_path "$name").bak"
-      fi
-      mv -f "$tmp/$asset" "$(bin_path "$name")"
-      chmod +x "$(bin_path "$name")"
-    done
-    probe_version "$(nasd_bin)" >/dev/null || die "替换后的 nasd 无法执行"
-    probe_version "$(nasm_bin)" >/dev/null || die "替换后的 nasm 无法执行"
-    info "二进制已替换(v$(probe_version "$(nasd_bin)"));未自动启动,可执行 bash nas.sh start"
+  fi
+
+  if [ -f "$(nasd_bin)" ]; then
+    mv -f "$(nasd_bin)" "$(nasd_bin).bak"
+  fi
+  mv -f "$tmp/$ASSET_NASD" "$(nasd_bin)"
+  chmod +x "$(nasd_bin)"
+  if is_linux && [ -z "$(probe_version "$(nasd_bin)")" ]; then
+    die "替换后的 nasd 无法执行"
+  fi
+  info "二进制已替换(v$(probe_version "$(nasd_bin)"))"
+
+  if [ "$was_running" = "1" ]; then
+    # 原运行中 → 重启并健康检查;失败自动回滚
+    info "重启 nasd..."
+    start_nasd || {
+      warn "新版启动失败,回滚到 .bak 版本"
+      stop_nasd
+      [ -f "$(nasd_bin).bak" ] && mv -f "$(nasd_bin).bak" "$(nasd_bin)"
+      chmod +x "$(nasd_bin)"
+      start_nasd || die "回滚后仍无法启动,请查看日志: $(log_path)"
+      die "已回滚到旧版本 v$(probe_version "$(nasd_bin)")"
+    }
+    info "nasd 更新完成: v$(probe_version "$(nasd_bin)")"
+    rm -f "$(nasd_bin).bak"
+  else
+    info "更新完成(未启动),可执行 bash nas.sh start"
   fi
   NAS_TMP=""; rm -rf "$tmp"
-}
-
-# ---------------- 生命周期(委托 nasm) ----------------
-cmd_start() {
-  [ -s "$(nasm_bin)" ] || die "未安装 nasm,请先 bash nas.sh install"
-  ensure_dirs
-  "$(nasm_bin)" start
-}
-cmd_stop() {
-  if [ ! -s "$(nasm_bin)" ]; then info "nasm 未安装,无需停止"; return; fi
-  "$(nasm_bin)" stop || true
-}
-cmd_restart() { cmd_stop; cmd_start; }
-cmd_status() {
-  if [ ! -s "$(nasm_bin)" ]; then info "nasm 未安装(见: bash nas.sh install)"; return; fi
-  "$(nasm_bin)" status "$@"
-}
-cmd_log() {
-  [ -s "$(nasm_bin)" ] || die "未安装 nasm,请先 bash nas.sh install"
-  "$(nasm_bin)" log "$@"
 }
 
 # ---------------- 体检 ----------------
 cmd_doctor() {
   info "体检报告(部署根: $NAS_ROOT)"
-  local ok=0 bad=0
+  local ok=0 bad=0 port
+  port="$(config_port)"
   check() {
     if eval "$2" >/dev/null 2>&1; then info "  [✓] $1"; ok=$((ok+1)); else warn "  [✗] $1"; bad=$((bad+1)); fi
   }
   require_cmds
   check "目录结构"                        "ensure_dirs"
-  check "nasd 二进制存在"                 "[ -x \"\$(nasd_bin)\" ]"
-  check "nasm 二进制存在"                 "[ -x \"\$(nasm_bin)\" ]"
-  check "nasd 可执行(版本探测)"           "( [ -x \"\$(nasd_bin)\" ] && probe_version \"\$(nasd_bin)\" >/dev/null )"
-  check "HTTP 健康(:$PORT_DEFAULT)"       "curl -sf -o /dev/null http://127.0.0.1:$PORT_DEFAULT/health"
+  check "nasd 二进制存在"                 "[ -s \"\$(nasd_bin)\" ]"
+  check "nasd 可执行(版本探测)"           "( [ -s \"\$(nasd_bin)\" ] && probe_version \"\$(nasd_bin)\" >/dev/null )"
+  check "HTTP 健康(:$port)"               "health_up"
   df -h "$NAS_ROOT" 2>/dev/null | tail -1 | awk '{ print "  [i] 磁盘: " $4 " 可用 / " $2 " 总量(" $5 " 已用)" }' || true
   info "检查完成: $ok 项通过, $bad 项异常"
   [ "$bad" = "0" ] || err "存在异常项,请按上方提示处理"
@@ -404,15 +501,17 @@ usage() {
   cat <<'EOF'
 Termux NAS 一键管理脚本(nas.sh)
 
+主程序为单一二进制 nasd;本脚本全周期管理其安装/更新/启停/状态/日志/卸载。
+
 用法:
   bash nas.sh install [--service]  安装:建目录→拉取 Release 二进制→SHA256 校验→
                                    赋予可执行权限(可选:注册 runit 开机自启)
   bash nas.sh update [-f] [版本]   更新到最新(或指定 v<版本>):
-                                   下载→校验→优雅停机→原子替换(.bak)→重启→失败回滚
-  bash nas.sh start                启动 nasd(runit 优先,否则后台)
-  bash nas.sh stop                 优雅停止 nasd
+                                   下载→校验→优雅停止→原子替换(.bak)→重启→失败回滚
+  bash nas.sh start                启动 nasd(runit 优先,否则后台 nohup)
+  bash nas.sh stop                 优雅停止 nasd(SIGTERM,超时强制结束)
   bash nas.sh restart              重启 nasd
-  bash nas.sh status [-json]       查看运行状态
+  bash nas.sh status               查看运行状态(版本/PID/Uptime/端口)
   bash nas.sh log [-n 行数]         查看主框架日志尾部(默认 50 行)
   bash nas.sh doctor               环境体检(二进制/目录/健康端口/磁盘)
   bash nas.sh uninstall [-y] [--service]  卸载(需 -y 才真正删除数据)

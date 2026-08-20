@@ -1,7 +1,7 @@
 # Release 流水线:推送 v* 标签时自动构建并发布 android/arm64 二进制。
 #
 # 用途(配合仓库根目录 nas.sh):
-#   - 产出资产:nasm-android-arm64 / nasd-android-arm64 / sha256sums.txt
+#   - 产出资产:nasd-android-arm64 / sha256sums.txt
 #   - nas.sh 通过 releases/latest/download 或 download/v<版本> 固定地址拉取
 #   - 版本号取自标签(去掉前导 v),注入 ldflags 作为二进制版本信息
 #
@@ -45,7 +45,7 @@ jobs:
           npm ci
           npm run build
 
-      - name: Build android/arm64 binaries
+      - name: Build android/arm64 binary
         working-directory: src
         env:
           VERSION: ${{ github.ref_name }}
@@ -58,12 +58,10 @@ jobs:
             -X github.com/termux-nas/nas/internal/version.Commit=${COMMIT} \
             -X github.com/termux-nas/nas/internal/version.BuildTime=${BUILD_TIME}"
           mkdir -p dist
-          for bin in nasm nasd; do
-            echo "==> 构建 ${bin} android/arm64 (v${VERSION})"
-            CGO_ENABLED=0 GOOS=android GOARCH=arm64 \
-              go build -trimpath -ldflags "$LDFLAGS" \
-              -o "dist/${bin}-android-arm64" "./cmd/${bin}"
-          done
+          echo "==> 构建 nasd android/arm64 (v${VERSION})"
+          CGO_ENABLED=0 GOOS=android GOARCH=arm64 \
+            go build -trimpath -ldflags "$LDFLAGS" \
+            -o "dist/nasd-android-arm64" "./cmd/nasd"
 
       - name: Generate checksums
         working-directory: src/dist

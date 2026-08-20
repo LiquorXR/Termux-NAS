@@ -29,18 +29,16 @@ web:
 
 build: web
 	@mkdir -p ../bin
-	@rm -f ../bin/nasm ../bin/nasd ../bin/nasm.exe ../bin/nasd.exe
-	CGO_ENABLED=0 go build -trimpath -ldflags "$(LDFLAGS)" -o ../bin/nasm$(BINEXT) ./cmd/nasm
+	@rm -f ../bin/nasd ../bin/nasd.exe
 	CGO_ENABLED=0 go build -trimpath -ldflags "$(LDFLAGS)" -o ../bin/nasd$(BINEXT) ./cmd/nasd
 	@echo "==> 构建完成:"
-	@ls -lh ../bin/nasm$(BINEXT) ../bin/nasd$(BINEXT)
+	@ls -lh ../bin/nasd$(BINEXT)
 
 android: web
 	@mkdir -p ../bin
-	CGO_ENABLED=0 GOOS=android GOARCH=arm64 go build -trimpath -ldflags "$(LDFLAGS)" -o ../bin/nasm ./cmd/nasm
 	CGO_ENABLED=0 GOOS=android GOARCH=arm64 go build -trimpath -ldflags "$(LDFLAGS)" -o ../bin/nasd ./cmd/nasd
 	@echo "==> Termux(android/arm64)构建完成:"
-	@ls -lh ../bin/nasm ../bin/nasd
+	@ls -lh ../bin/nasd
 
 test:
 	go vet ./...
@@ -61,4 +59,4 @@ tidy:
 	go mod tidy
 
 clean:
-	rm -f ../bin/nasm ../bin/nasd
+	rm -f ../bin/nasd

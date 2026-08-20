@@ -1,6 +1,11 @@
 //go:build unix
 
-package mgmt
+// Package lock 提供 nasd 单实例锁(跨平台实现)。
+//
+// Termux/Linux走 flock(syscall),Windows开发环境走内核互斥量。
+// 由 nasd.Run 在启动时获取;第二个 nasd 实例在此直接失败退出,
+// 杜绝双实例同时监听同一端口的竞态。
+package lock
 
 import (
 	"errors"
@@ -10,8 +15,6 @@ import (
 )
 
 // AcquireLock 获取单实例锁(run/nas.lock,flock 非阻塞)。
-// Termux/Linux 生产路径:第二个 nasd 实例在此直接失败退出,
-// 杜绝双实例同时监听管理 socket 的竞态。
 // 进程退出时内核自动释放;锁文件刻意保留(删除会引入竞态)。
 func AcquireLock(lockPath string) (release func() error, err error) {
 	f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o600)

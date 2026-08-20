@@ -18,7 +18,6 @@ func TestResolve(t *testing.T) {
 		"FilesDir": "/nas/files",
 		"DBFile":   "/nas/data/nas.db",
 		"ConfFile": "/nas/data/config.json",
-		"SockPath": "/nas/run/nas.sock",
 	}
 	got := map[string]string{
 		"Root":     p.Root, // Root 为传入原值,不经过 Join,不做分隔符转换
@@ -30,7 +29,6 @@ func TestResolve(t *testing.T) {
 		"FilesDir": p.FilesDir,
 		"DBFile":   p.DBFile,
 		"ConfFile": p.ConfFile,
-		"SockPath": p.SockPath,
 	}
 	for field, w := range want {
 		exp := w
@@ -57,16 +55,13 @@ func TestLoadDefaultsAndRoundtrip(t *testing.T) {
 	if c.Port != 7531 || c.Host != "0.0.0.0" {
 		t.Errorf("默认值不符: %+v", c)
 	}
-	if len(c.ManageToken) != 64 {
-		t.Errorf("管理 token 应为 64 位 hex,得到 %d", len(c.ManageToken))
-	}
-	// 再次加载:保持一致(随机 token 不重复生成)
+	// 再次加载:保持一致
 	c2, err := Load(p)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c2.ManageToken != c.ManageToken {
-		t.Error("重复加载不应重新生成管理 token")
+	if c2.CreatedAt != c.CreatedAt {
+		t.Error("重复加载不应改写已有配置")
 	}
 	// 修改字段并保存
 	c.Port = 9000
@@ -91,18 +86,18 @@ func TestLoadDefaultsMissingField(t *testing.T) {
 		t.Fatal(err)
 	}
 	// 写一份缺字段的配置(模拟旧版本)
-	if err := os.WriteFile(p.ConfFile, []byte(`{"manage_token":"abc"}`), 0o600); err != nil {
+	if err := os.WriteFile(p.ConfFile, []byte(`{"port":9000}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	c, err := Load(p)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.Port != 7531 || c.Host != "0.0.0.0" {
+	if c.Host != "0.0.0.0" {
 		t.Errorf("缺字段应回填默认值: %+v", c)
 	}
-	if c.ManageToken != "abc" {
-		t.Errorf("已有字段应保留: %s", c.ManageToken)
+	if c.Port != 9000 {
+		t.Errorf("已有字段应保留: %d", c.Port)
 	}
 }
 

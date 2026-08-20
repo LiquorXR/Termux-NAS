@@ -1,7 +1,7 @@
 // nasd · Termux NAS 主框架守护进程
 //
-// 职责:用户通道 HTTP(内建 NAS 功能)+ 管理通道(仅生命周期)。
-// 生命周期由 nasm 通过 Unix socket 管理;插件由 nasd 全权控制(Web UI)。
+// 职责:用户通道 HTTP(内建 NAS 功能)。生命周期由仓库根 nas.sh 全周期
+// 管理(SIGTERM 优雅停止 / HTTP 健康探活);插件由 nasd 全权控制(Web UI)。
 package main
 
 import (

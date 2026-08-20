@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Termux NAS 构建脚本
+# Termux NAS 构建脚本(仅 nasd 单一二进制)
 # 用法:
-#   ./scripts/build.sh              本机构建(nasm + nasd → ../bin/)
+#   ./scripts/build.sh              本机构建(nasd → ../bin/)
 #   ./scripts/build.sh android     交叉编译 Termux(android/arm64)
 #   ./scripts/build.sh android amd64 指定架构
 set -euo pipefail
@@ -42,12 +42,10 @@ echo "==> 构建前端(Vite → internal/webui/dist,go:embed 打包)"
 ( cd "$ROOT/web" && npm ci && npm run build )
 
 echo "==> 构建 target=${TARGET} GOOS=${GOOS} GOARCH=${GOARCH}"
-rm -f "$OUT"/nasm "$OUT"/nasd "$OUT"/nasm.exe "$OUT"/nasd.exe
-for bin in nasm nasd; do
-  echo "    - ${bin}"
-  CGO_ENABLED=0 GOOS="$GOOS" GOARCH="$GOARCH" \
-    go build -trimpath -ldflags "$LDFLAGS" -o "$OUT/${bin}${BINEXT}" "./cmd/$bin"
-done
+rm -f "$OUT"/nasd "$OUT"/nasd.exe
+echo "    - nasd"
+CGO_ENABLED=0 GOOS="$GOOS" GOARCH="$GOARCH" \
+  go build -trimpath -ldflags "$LDFLAGS" -o "$OUT/nasd${BINEXT}" "./cmd/nasd"
 
 echo "==> 完成:"
-ls -lh "$OUT"/nasm* "$OUT"/nasd*
+ls -lh "$OUT"/nasd*

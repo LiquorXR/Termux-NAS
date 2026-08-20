@@ -1,6 +1,6 @@
 //go:build windows
 
-package mgmt
+package lock
 
 import (
 	"errors"

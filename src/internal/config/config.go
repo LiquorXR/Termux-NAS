@@ -5,8 +5,6 @@
 package config
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,7 +14,7 @@ import (
 
 // 部署根内的固定子目录名。
 const (
-	DirBin     = "bin"     // nasm / nasd 二进制
+	DirBin     = "bin"     // nasd 二进制
 	DirPlugins = "plugins" // 插件二进制(可执行文件)
 	DirData    = "data"    // 运行时数据:nas.db / config.json / logs/
 	DirLogs    = "logs"    // data/logs
@@ -28,8 +26,6 @@ const (
 type Config struct {
 	// Port 用户通道 HTTP 监听端口(高位端口,默认 7531)。
 	Port int `json:"port"`
-	// ManageToken 管理通道鉴权 token,首次初始化时随机生成。
-	ManageToken string `json:"manage_token"`
 	// Host 用户通道监听地址(默认 0.0.0.0,局域网可访问)。
 	Host string `json:"host,omitempty"`
 	// FileRoot 文件管理根目录。为空时使用 <root>/files;
@@ -54,11 +50,10 @@ type Paths struct {
 	Plugins  string
 	DataDir  string
 	LogDir   string
-	RunDir   string
+	RunDir   string // run/ 存放单实例锁 run/nas.lock
 	FilesDir string // 文件管理根目录(默认 <root>/files)
 	DBFile   string // data/nas.db
 	ConfFile string // data/config.json
-	SockPath string // run/nas.sock(Unix 平台)
 }
 
 // DefaultRoot 返回默认部署根:$NAS_ROOT 或 $HOME/nas。
@@ -85,7 +80,6 @@ func Resolve(root string) Paths {
 		FilesDir: filepath.Join(root, DirFiles),
 		DBFile:   filepath.Join(root, DirData, "nas.db"),
 		ConfFile: filepath.Join(root, DirData, "config.json"),
-		SockPath: filepath.Join(root, DirRun, "nas.sock"),
 	}
 }
 
@@ -118,13 +112,8 @@ func Load(p Paths) (*Config, error) {
 	if !errors.Is(err, os.ErrNotExist) {
 		return nil, fmt.Errorf("读取 %s: %w", p.ConfFile, err)
 	}
-	// 首次初始化:生成默认配置 + 管理 token
+	// 首次初始化:生成默认配置
 	c := &Config{Port: 7531, Host: "0.0.0.0", PluginIdleTimeout: 600}
-	token, err := randomToken(32)
-	if err != nil {
-		return nil, fmt.Errorf("生成管理 token: %w", err)
-	}
-	c.ManageToken = token
 	if err := Save(p, c); err != nil {
 		return nil, err
 	}
@@ -146,12 +135,4 @@ func Save(p Paths, c *Config) error {
 		return fmt.Errorf("落盘配置: %w", err)
 	}
 	return nil
-}
-
-func randomToken(n int) (string, error) {
-	b := make([]byte, n)
-	if _, err := rand.Read(b); err != nil {
-		return "", err
-	}
-	return hex.EncodeToString(b), nil
 }

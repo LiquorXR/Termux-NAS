@@ -1,8 +1,8 @@
 # Termux NAS 框架开发文档
 
-> 版本:0.1(设计稿)
+> 版本:0.2(架构更新:nasm 已移除,生命周期全由 nas.sh 管理)
 > 日期:2026-08-19
-> 架构:**管理模块(nasm)+ 主框架(nasd,内建 NAS 必要功能)+ 插件扩展(独立二进制)**
+> 架构:**主框架(nasd,单一二进制,内建 NAS 必要功能)+ 一键管理脚本(nas.sh)+ 插件扩展(独立二进制)**
 > 技术栈:Go + Fiber + SQLite + 前端 Vite 工程化(HTMX + 原生 JS + 手写设计系统)
 > 部署环境:Termux(Android 上的 Linux 环境),单进程 + 可选插件进程
 
@@ -17,12 +17,12 @@
 - **高性能、低资源占用**:主框架为 Go 单二进制,常驻内存约 15-30MB
 - **完全兼容移动端 Termux**:无 root 可用,高位端口,termux-services 守护
 - **可扩展**:核心功能内建,扩展功能以独立二进制插件形式动态加载
-- **易管理**:管理模块(nasm)只负责主框架的生命周期(启动/停止/更新);插件的一切操作由主框架(nasd)统一控制
+- **易管理**:一键脚本(nas.sh)负责主框架 nasd 的生命周期(安装/更新/启停/状态/日志/卸载);插件的一切操作由主框架(nasd)统一控制
 
 ### 1.2 核心设计原则
 
 1. **混合架构**:核心功能(认证/文件/监控/服务控制/备份)内建在 nasd;扩展功能(下载/云盘/媒体/第三方)做成插件
-2. **双二进制、职责单点**:nasm 只管理 nasd 本体(启动/停止/更新);nasd 全权控制插件(安装/卸载/启停/更新)
+2. **单二进制、职责单点**:nas.sh 只管理 nasd 本体(安装/更新/启停/状态/日志/卸载);nasd 全权控制插件(安装/卸载/启停/更新)
 3. **插件进程级隔离**:插件独立崩溃不影响主框架,可独立更新
 4. **懒加载**:插件按需启动(点开页面才启动进程),常驻内存不增加
 5. **单部署根**:`~/nas/` 一个目录包含一切,备份 = 拷贝目录
@@ -38,7 +38,7 @@
 └──────────────────────────┬──────────────────────────────┘
                            │
 ┌──────────────────────────▼──────────────────────────────┐
-│             nasd · 主框架(常驻守护进程)                     │
+│             nasd · 主框架(常驻守护进程,单一二进制)          │
 │                                                          │
 │  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐    │
 │  │ 认证中心  │ │ 文件管理  │ │ 系统监控  │ │ 服务控制  │    │
@@ -46,15 +46,15 @@
 │  ┌──────────┐ ┌────────────────────────────────────┐     │
 │  │ 备份中心  │ │ 插件管理器(安装/卸载/启停/更新/懒加载) │     │
 │  └──────────┘ └────────────────────────────────────┘     │
-│  SQLite · 配置 · 日志 · 管理 API (Unix socket)             │
+│  SQLite · 配置 · 日志 · 单实例锁(run/nas.lock)             │
 └──────────────┬───────────────────────────────▲───────────┘
-               │ 管理API(仅生命周期)           │ 用户请求 /p/<id>/*
+               │ SIGTERM 优雅停止 / /health 探活  │ 用户请求 /p/<id>/*
 ┌──────────────▼───────────────┐   ┌──────────┴───────────┐
-│  nasm · 管理模块(CLI)         │   │  plugins/ 插件二进制   │
-│  start/stop/restart/update   │   │  download :18002     │
-│  不管理插件 · 不常驻           │   │  alist :18003        │
-└──────────────────────────────┘   │  media  :18004       │
-                                   │  (nasd 全权控制)      │
+│  nas.sh · 一键管理脚本        │   │  plugins/ 插件二进制   │
+│  install/update/start/      │   │  download :18002     │
+│  stop/restart/status/log    │   │  alist :18003        │
+│  不管理插件 · 不常驻           │   │  media  :18004       │
+└──────────────────────────────┘   │  (nasd 全权控制)      │
                                    └──────────────────────┘
 ```
 
@@ -62,18 +62,20 @@
 
 | 组件 | 形态 | 职责 | 常驻 |
 |------|------|------|------|
-| **nasm** | CLI 二进制 | 仅管理主框架本体:启动/停止/重启/更新/状态 | 否(用完即走) |
+| **nas.sh** | bash 脚本(仓库根) | 主框架全生命周期:安装/更新/启停/状态/日志/卸载 | 否(用完即走) |
 | **nasd** | 守护进程二进制 | 运行时全部能力:HTTP 服务、内建 NAS 功能、**插件全权管理** | 是(runit 托管) |
 | **插件** | 独立二进制 | 扩展功能:下载/云盘/媒体等;生命周期完全由 nasd 控制 | 按需(懒加载) |
 
-> **职责单点原则**:插件的安装、卸载、启停、更新**只能**通过 nasd(Web UI 的「插件管理」页或用户通道 API)操作,nasm 不感知插件存在。nasm 与插件之间不存在任何直接交互。
+> **职责单点原则**:插件的安装、卸载、启停、更新**只能**通过 nasd(Web UI 的「插件管理」页或用户通道 API)操作,nas.sh 不感知插件存在。nas.sh 与插件之间不存在任何直接交互。
 
-### 2.2 两条通信通道(严格分离)
+### 2.2 通信与生命周期
 
-| 通道 | 路径 | 用途 | 暴露面 |
-|------|------|------|--------|
+| 通道/方式 | 路径/机制 | 用途 | 暴露面 |
+|------|------|--------|--------|
 | 用户通道 | `:7531` HTTP | 浏览器访问 Web UI / API | 局域网 / Tailscale |
-| 管理通道 | `~/nas/run/nas.sock` Unix socket | nasm ↔ nasd 管理指令 | **仅本机** |
+| 生命周期控制 | SIGTERM 优雅停止 + `/health` 探活 + 日志文件直读 | nas.sh 管理主程序 | 仅本机(Termux 命令行) |
+
+> 不保留任何本地管理 socket 或管理 CLI;主程序只有一个二进制 `nasd`。
 
 ---
 
@@ -82,8 +84,7 @@
 ```
 ~/nas/                          # 单一部署根
 ├── bin/
-│   ├── nasm                    # 管理模块(用户 PATH 中的命令)
-│   └── nasd                    # 主框架守护进程
+│   └── nasd                    # 主框架守护进程(单一二进制)
 ├── plugins/                    # 插件二进制(可执行文件)
 │   ├── download                # 下载中心插件
 │   ├── alist                   # 云盘聚合插件
@@ -92,78 +93,58 @@
 │   ├── nas.db                  # SQLite(配置/插件注册/系统状态)
 │   ├── config.json             # 主框架配置
 │   └── logs/
-│       ├── nasd.log            # 主框架日志
-│       └── plugin-<id>.log     # 各插件日志(统一收集)
+│       └── nasd.log            # 主框架日志
 └── run/
-    └── nas.sock                # 管理 socket(运行时创建)
+    └── nas.lock                # 单实例锁(nasd flock,运行时创建)
 ```
 
 **约定**:
-- `nasm` 应链接到 PATH(如 `ln -s ~/nas/bin/nasm $PREFIX/bin/nasm`)
 - 备份 `data/` 目录 = 备份全部配置与状态;`plugins/` 可重新下载
-- 更新只动对应二进制文件,互不干扰
+- 更新只动 `bin/nasd` 一个二进制,`.bak` 保留旧版以便回滚
 
 ---
 
-## 4. 管理模块 nasm(CLI)
+## 4. 生命周期管理(nas.sh,单一脚本)
 
-> **职责边界**:nasm 只负责主框架 nasd 的**生命周期管理**(启动/停止/重启/更新/状态查询)。
+> **职责边界**:nas.sh 只负责主框架 nasd 的**生命周期管理**(安装/更新/启停/状态/日志/卸载)。
 > **不包含插件管理**——插件的安装、卸载、启停、更新全部由 nasd 在 Web UI(「插件管理」页)中控制。
 
 ### 4.1 命令设计
 
 ```
-nasm start                     # 启动 nasd 守护进程(runit 托管)
-nasm stop                      # 优雅停止 nasd
-nasm restart                   # 重启 nasd
-nasm status                    # 查看 nasd 运行状态(版本/uptime/健康)
-nasm log [lines]               # 查看主框架日志
-nasm update [version]          # 更新主框架 nasd
-nasm self-update               # 更新 nasm 自身
-nasm version                   # 版本信息
+bash nas.sh install [--service]  # 安装(可选注册 runit 开机自启)
+bash nas.sh update [-f] [版本]    # 更新到最新(或指定 v<版本>)
+bash nas.sh start|stop|restart   # 启动/优雅停止/重启
+bash nas.sh status|log [-n N]    # 状态/日志尾部
+bash nas.sh doctor               # 环境体检
+bash nas.sh uninstall [-y]       # 卸载(需 -y 才删数据)
+bash nas.sh self-update          # 更新 nas.sh 自身
 ```
 
-> 插件状态不通过 nasm 查看——请在 Web UI 的「插件管理」页查看。
+> 插件状态不通过 nas.sh 查看——请在 Web UI 的「插件管理」页查看。
 
-### 4.2 与 nasd 的通信(管理 API · 仅生命周期)
+### 4.2 与 nasd 的交互(无需管理 socket)
 
-- 通过 `~/nas/run/nas.sock`(Unix socket)发起 JSON-RPC 请求
-- 管理 API 仅监听本地 socket,**不暴露公网**
-- 请求鉴权:管理 token(首次初始化时生成,存于 `data/config.json`)
+- **停止**:向 nasd 进程发送 SIGTERM(nasd 收到后走 `ctx.Done()` 做优雅退出:
+  先停全部插件进程 → HTTP `ShutdownWithTimeout` → 释放单实例锁)
+- **探活/状态**:请求用户通道 `GET /health`(返回 status/version/uptime/pid/port)
+- **日志**:直读 `data/logs/nasd.log` 尾部
+- **单实例**:nasd 启动时对 `run/nas.lock` 做 flock,第二个实例直接失败退出
+- **不暴露任何本地管理 socket/端口**,仅本机 Termux 命令行可控
 
-**管理 API 端点(JSON-RPC)**:
-
-```jsonc
-// 请求
-{ "method": "daemon.status", "params": {}, "id": 1 }
-// 响应
-{ "result": { "running": true, "version": "0.1.0", "uptime": 3600 }, "id": 1 }
-```
-
-| 方法 | 参数 | 说明 |
-|------|------|------|
-| `daemon.status` | - | 返回 nasd 运行状态、版本、uptime、健康检查结果 |
-| `daemon.stop` | - | 优雅停止(先停所有插件,再退出) |
-| `daemon.enterUpdate` | - | 进入更新模式(暂停服务,等待替换) |
-| `log.tail` | `{lines}` | 获取主框架日志尾部 |
-
-> 管理 API **只**包含主框架生命周期方法。插件相关操作不在 socket 通道中暴露,统一走用户通道(Web UI / HTTP API,需登录)。
-
-### 4.3 更新主框架流程(nasm update)
+### 4.3 更新主框架流程(nas.sh update)
 
 ```
-① nasm 下载新版 nasd → 临时文件 nasd.new
-② 校验:版本号 + SHA256 校验和(防损坏/防篡改)
-③ 通过 socket 调用 daemon.enterUpdate → 旧 nasd 优雅退出
-④ 原子替换:rename(nasd.new → bin/nasd)
-⑤ nasm 重新启动新 nasd
-⑥ 验证健康检查 → 完成(失败则回滚旧版本)
-全程 nasm 自身在线,不存在"更新自己"的问题
+① nas.sh 下载新版 nasd → 临时文件(SHA256 校验,防损坏/防篡改)
+② 若运行中:SIGTERM 优雅停止,等待进程退出、单实例锁释放
+③ 原子替换:旧版 → nasd.bak;新版 → bin/nasd;chmod +x
+④ 重新启动新 nasd,轮询 /health 直到就绪
+⑤ 就绪即完成(清理 .bak);启动失败则回滚 .bak 旧版并重启
 ```
 
-### 4.4 插件管理(不在 nasm 中)
+### 4.4 插件管理(不在 nas.sh 中)
 
-> 插件的安装、卸载、启停、更新、日志查看**全部由 nasd 的「插件管理」模块控制**,操作入口为 Web UI 的「插件管理」页面(需登录),详见 [5.3 插件管理器](#53-插件管理器插件全权控制--核心组件)。nasm 不提供任何插件命令。
+> 插件的安装、卸载、启停、更新、日志查看**全部由 nasd 的「插件管理」模块控制**,操作入口为 Web UI 的「插件管理」页面(需登录),详见 [5.3 插件管理器](#53-插件管理器插件全权控制--核心组件)。nas.sh 不提供任何插件命令。
 
 ---
 
@@ -172,10 +153,10 @@ nasm version                   # 版本信息
 ### 5.1 进程生命周期
 
 ```
-启动:Termux:Boot → nasm start → runit 托管 nasd
-运行:nasm start 拉起 → 加载配置 → 打开 SQLite → 扫描插件(登记,不启动)
-     → 启动 HTTP :7531 → 监听管理 socket(仅生命周期方法)
-停止:管理 API daemon.stop → 逐个停止插件 → 关闭 HTTP → 持久化 → 退出
+启动:Termux:Boot → nas.sh/ sv → runit 托管 nasd
+运行:nasd 启动(flock 单实例锁)→ 加载配置 → 打开 SQLite → 扫描插件(登记,不启动)
+     → 启动 HTTP :7531(/health 供探活)
+停止:SIGTERM → 逐个停止插件 → 关闭 HTTP(超时)→ 释放单实例锁 → 退出
 ```
 
 ### 5.2 内建 NAS 必要功能模块
@@ -193,7 +174,7 @@ nasm version                   # 版本信息
 
 ### 5.3 插件管理器(插件全权控制 · 核心组件)
 
-> **插件操作唯一入口**:插件的安装、卸载、启停、更新、状态查看,全部通过 nasd 的「插件管理」模块完成,入口为 Web UI 的「插件管理」页面(用户通道 HTTP API,需登录)。nasm 不提供任何插件命令,管理 socket 也不暴露插件方法。
+> **插件操作唯一入口**:插件的安装、卸载、启停、更新、状态查看,全部通过 nasd 的「插件管理」模块完成,入口为 Web UI 的「插件管理」页面(用户通道 HTTP API,需登录)。nas.sh 只管理主框架生命周期,不提供任何插件命令。
 
 **扫描**:启动时扫描 `~/nas/plugins/` 下所有可执行文件 → 登记元信息(不启动进程)。
 
@@ -366,7 +347,7 @@ GET  /p/<plugin_id>/*           # 插件路由(反代,统一鉴权)
 | 项目 | 方案 |
 |------|------|
 | 认证 | 会话 cookie + CSRF token;密码哈希(Argon2id) |
-| 管理通道 | 仅 Unix socket 本机访问 + 管理 token |
+| 生命周期管理 | 仅本机 Termux 命令行(nas.sh);无本地管理 socket/端口暴露 |
 | 插件鉴权 | 用户请求经 nasd 校验后透传 token;插件不暴露公网端口(监听 127.0.0.1) |
 | 分享链接 | 短随机 token,可设过期时间;路径穿越防护(所有路径规范化校验) |
 | 远程访问 | Tailscale / Cloudflare Tunnel 加密隧道,不建议直接暴露 7531 |
@@ -378,12 +359,12 @@ GET  /p/<plugin_id>/*           # 插件路由(反代,统一鉴权)
 
 | 里程碑 | 内容 | 交付物 |
 |--------|------|--------|
-| **M1** | 项目骨架:go.mod、nasm CLI 框架、nasd 守护骨架、Unix socket 管理通道、start/stop/status | 可运行的双二进制骨架 |
+| **M1** | 项目骨架:go.mod、nasd 守护骨架、生命周期管理(nas.sh/nasm)、start/stop/status | 可运行的单二进制骨架 |
 | **M2** | 认证中心 + 前端壳(登录页/布局/导航)+ SQLite | 能登录的空壳 NAS |
 | **M3** | 内建模块:文件管理 + 系统监控(轮询看板) | NAS 核心功能可用 |
 | **M4** | 插件系统:管理器(安装/卸载/启停/更新 API)+ 注册协议 + 反代 + 懒加载 + download 插件验证 | 插件全链路跑通,Web UI 插件管理页可用 |
 | **M5** | 服务控制 + 备份中心 + 安全加固 | 完整 NAS |
-| **M6** | nasm update 更新流程 + 插件市场 + PWA + Tailscale 集成 | 可日常使用 |
+| **M6** | 原子更新流程 + 插件市场 + PWA + Tailscale 集成 | 可日常使用 |
 
 ---
 
@@ -407,14 +388,14 @@ bash nas.sh start
 # 日常
 bash nas.sh status            # 状态
 bash nas.sh log -n 50         # 日志
-bash nas.sh update            # 更新到最新 Release(先更 nasd,后更 nasm;自动回滚)
+bash nas.sh update            # 更新到最新 Release(优雅停止→替换→重启→回滚)
 bash nas.sh update 0.2.0      # 更新到指定版本
 bash nas.sh doctor            # 体检
 bash nas.sh uninstall -y      # 卸载(需 -y 才删数据)
 ```
 
 二进制分发:推送 `v*` 标签触发 `.github/workflows/release.yml` 自动交叉编译并发布
-`nasm-android-arm64` / `nasd-android-arm64` / `sha256sums.txt`。
+`nasd-android-arm64` 与 `sha256sums.txt`。
 `nas.sh` 通过 `releases/latest/download`(无需 API/jq)拉取;`NAS_DIST_URL` 可覆盖为镜像。
 
 ### 10.2 源码构建(贡献者 / 离线回退)
@@ -423,9 +404,8 @@ bash nas.sh uninstall -y      # 卸载(需 -y 才删数据)
 # 依赖
 pkg install golang termux-services termux-api
 
-# 构建
+# 构建(单一二进制 nasd)
 cd ~/nas/src && CGO_ENABLED=0 go build -ldflags="-s -w" -o ../bin/nasd ./cmd/nasd
-cd ~/nas/src && CGO_ENABLED=0 go build -ldflags="-s -w" -o ../bin/nasm ./cmd/nasm
 
 # 服务注册(runit)
 pkg install termux-services
@@ -448,8 +428,8 @@ mkdir -p $PREFIX/var/service/nasd/log
 |--------|------|------|
 | 插件加载方式 | 独立 Go 二进制(非 WASM/Lua/编译期) | 开发零学习成本、原生性能、进程隔离、可热更新 |
 | 核心功能归属 | 内建在 nasd | 低内存、单进程、Termux 友好、部署简单 |
-| 管理模块分离 | nasm 独立二进制 | 更新 nasd 不影响管理工具,权限分离 |
-| **职责单点** | **nasm 只管理主框架生命周期;插件全权由 nasd 控制(Web UI)** | 单一管理入口,避免两套命令/两处状态,操作一致性好 |
-| 管理通道 | Unix socket(仅本机),仅暴露生命周期方法 | 管理操作不暴露公网;插件操作走用户通道(需登录) |
+| 管理方式 | 单一脚本 nas.sh(SIGTERM/health/日志直读) | 无需额外 Go 管理二进制;零编程能力即可运维 |
+| **职责单点** | **nas.sh 只管理主框架生命周期;插件全权由 nasd 控制(Web UI)** | 单一管理入口,避免两套命令/两处状态,操作一致性好 |
+| 进程守护 | 单实例锁(flock)+ runit(sv)托管 | 防双实例竞态;开机自启与崩溃自动拉起 |
 | 插件内存策略 | 懒加载 + 空闲回收 | 常驻内存不随插件数量增长 |
-| 通信协议 | 用户通道 HTTP :7531 + 管理 JSON-RPC socket | 两条通道职责严格分离 |
+| 通信协议 | 用户通道 HTTP :7531(唯一对外) | 无本地管理 socket,精简暴露面 |
