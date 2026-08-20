@@ -67,8 +67,12 @@ pkg install curl                # first time: install the dependency
 # For networks in mainland China the ghfast.top mirror is recommended (nas.sh uses it by default too)
 curl -fsSL https://ghfast.top/https://raw.githubusercontent.com/LiquorXR/Termux-NAS/main/nas.sh -o nas.sh
 bash nas.sh install             # install
-bash nas.sh start               # start nasd in the background (detached supervisor keeps the parent alive, prevents orphan reclamation)
+bash nas.sh                     # interactive menu (start / install-update / uninstall / exit)
+bash nas.sh start               # or start nasd directly in the foreground (logs stream to the window, Ctrl+C stops gracefully)
 ```
+
+> In the foreground, nasd runs as a child of nas.sh (the whole parent chain stays alive), with logs streaming
+> to the window; to detach from the terminal use `nohup bash nas.sh start &`.
 
 > `nas.sh` downloads/updates the main program through the **ghfast.top mirror** by default
 > (`NAS_MIRROR`, default `https://ghfast.top/`); to hit GitHub directly: `export NAS_MIRROR=`,
@@ -85,9 +89,9 @@ Open `http://<phone LAN IP>:7531` in a browser.
 |---|---|
 | `bash nas.sh install` | install / repair |
 | `bash nas.sh update [-f] [version]` | update to latest (or a specific `v<version>`), with verify / backup / rollback |
-| `bash nas.sh start` / `stop` / `restart` | start / graceful stop / restart |
+| `bash nas.sh start` | start in the foreground (blocks; logs stream; Ctrl+C stops gracefully) |
+| `bash nas.sh stop` / `restart` | graceful stop / restart (stop then foreground start) |
 | `bash nas.sh status` / `log [-n N]` | status / view log tail |
-| `bash nas.sh doctor` | environment health check (binary / dirs / health port / disk) |
 | `bash nas.sh uninstall [-y]` | uninstall (prints a plan by default; `-y` really deletes data) |
 | `bash nas.sh self-update` | update the nas.sh script itself |
 
@@ -105,7 +109,7 @@ If you need to build it yourself (no network or custom build), first install the
 pkg install golang
 cd ~/nas/src && make android        # cross-compile the android/arm64 static binary (front end included)
 # artifact lands in ../bin/nasd; manage it with nas.sh from there on
-bash ../nas.sh start                # start nasd in the background (supervised)
+bash ../nas.sh start                # start nasd in the foreground (logs stream, Ctrl+C stops)
 ```
 
 ## Communication & Lifecycle Management

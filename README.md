@@ -61,8 +61,12 @@ pkg install curl                # 首次:补齐依赖
 # 国内网络建议经 ghfast.top 镜像下载脚本(nas.sh 内置下载同样默认走此镜像)
 curl -fsSL https://ghfast.top/https://raw.githubusercontent.com/LiquorXR/Termux-NAS/main/nas.sh -o nas.sh
 bash nas.sh install             # 安装
-bash nas.sh start               # 后台启动 nasd(自动分离监督进程托管,防孤儿被系统回收)
+bash nas.sh                     # 交互式菜单(启动/安装更新/卸载/退出)
+bash nas.sh start               # 或直接前台启动 nasd(日志直打窗口,Ctrl+C 优雅停止)
 ```
+
+> 前台启动时 nasd 作为 nas.sh 的子进程运行(父进程链全存活),日志实时打印到窗口;
+> 脱离终端常驻用 `nohup bash nas.sh start &`。
 
 > `nas.sh` 下载/更新主程序默认经 **ghfast.top 镜像**加速(`NAS_MIRROR`,
 > 默认 `https://ghfast.top/`);需要直连 GitHub 时:`export NAS_MIRROR=`,
@@ -79,9 +83,9 @@ bash nas.sh start               # 后台启动 nasd(自动分离监督进程托�
 |------|------|
 | `bash nas.sh install` | 安装/修复 |
 | `bash nas.sh update [-f] [版本]` | 更新到最新(或指定 `v<版本>`),自动校验/备份/回滚 |
-| `bash nas.sh start` / `stop` / `restart` | 启动 / 优雅停止 / 重启 |
+| `bash nas.sh start` | 前台启动(阻塞,日志直打;Ctrl+C 优雅停止) |
+| `bash nas.sh stop` / `restart` | 优雅停止 / 重启(停止后前台启动) |
 | `bash nas.sh status` / `log [-n N]` | 状态 / 查看日志尾部 |
-| `bash nas.sh doctor` | 环境体检(二进制/目录/健康端口/磁盘) |
 | `bash nas.sh uninstall [-y]` | 卸载(默认只打印计划,需 `-y` 才删除数据) |
 | `bash nas.sh self-update` | 更新 nas.sh 脚本自身 |
 
@@ -98,7 +102,7 @@ bash nas.sh start               # 后台启动 nasd(自动分离监督进程托�
 ```bash
 cd ~/nas/src && make android        # 交叉编译 android/arm64 静态二进制(含前端)
 # 产物在 ../bin/nasd,再用 nas.sh 后续流程管理即可
-bash ../nas.sh start                # 后台启动 nasd(监督进程托管)
+bash ../nas.sh start                # 前台启动 nasd(日志直打,Ctrl+C 优雅停止)
 ```
 
 ## 通信与生命周期管理

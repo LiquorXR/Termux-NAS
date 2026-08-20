@@ -40,7 +40,7 @@
 Build a **pluggable mobile NAS** inside Termux:
 
 - **High performance, low footprint**: the main frame is a single Go binary; resident memory is roughly 15–30 MB
-- **Fully Termux-compatible**: runs without root, uses high ports, daemonized by `nohup`
+- **Fully Termux-compatible**: runs without root, uses high ports, foreground-run daemon
 - **Extensible**: core functions are built in; extended functions are loaded dynamically as independent binary plugins
 - **Easy to manage**: a one-shot script (`nas.sh`) owns the whole `nasd` lifecycle (install/update/start/stop/status/log/uninstall); everything about plugins is controlled by the main frame (`nasd`) through the Web UI
 
@@ -100,7 +100,7 @@ Build a **pluggable mobile NAS** inside Termux:
 | Component | Form | Responsibility | Resident |
 |---|---|---|---|
 | **nas.sh** | bash script (repo root) | full lifecycle of the main frame: install/update/start-stop/status/log/uninstall | no (run-and-exit) |
-| **nasd** | daemon binary | all runtime capabilities: HTTP service, built-in NAS features, **full plugin management** | yes (nas.sh resident supervisor) |
+| **nasd** | daemon binary | all runtime capabilities: HTTP service, built-in NAS features, **full plugin management** | yes (foreground run) |
 | **Plugins** | independent binaries | extended features: download / cloud drive / media ...; lifecycle fully controlled by nasd | on demand (lazy load) |
 
 > **Single responsibility**: installing, uninstalling, starting/stopping and updating plugins can **only** be done
@@ -256,7 +256,7 @@ bash ../nas.sh start            # start nasd in the background (supervised)
 
 ## 6. Lifecycle Management with nas.sh
 
-`nas.sh` (script version 2.1.0) is the **only** management interface for the main daemon.
+`nas.sh` (script version 3.0.0) is the **only** management interface for the main daemon.
 All commands are listed in the quick table in README; this section explains internals.
 
 ### 6.1 Command surface
@@ -266,7 +266,6 @@ bash nas.sh install              # create layout → pull Release binary → SHA
 bash nas.sh update [-f] [版本]     # update to latest (or pinned v<version>)
 bash nas.sh start | stop | restart
 bash nas.sh status [-json] | log [-n N]
-bash nas.sh doctor                 # environment check (dirs/binary/health port/disk)
 bash nas.sh uninstall [-y]
 bash nas.sh self-update
 bash nas.sh help | version
@@ -650,7 +649,7 @@ Write is atomic (temp file + rename), permissions `0600`.
 4. android/arm64 cross-compile;
 5. `nas.sh` smoke test (mechanism + runtime layers; builds its own `v9.9.9` test binary and exercises
    install/reinstall idempotency, update, checksum-tamper rejection, uninstall protection, and on Linux
-   plus start/status/log/health/restart/doctor).
+   plus start/status/log/health/restart).
 
 ### Release (`release.yml`, on `v*` tag)
 
@@ -675,7 +674,7 @@ Manual release: `git tag v0.1.0 && git push origin v0.1.0`.
     SHA256 gate (tampered sums rejected with no side effects), `.bak` creation on forced replace,
     same-version skip, uninstall requires `-y`;
   - *Runtime layer* (Linux/ Termux/WSL2): start / status / log / health / restart / in-service
-    `update -f` (graceful stop → replace → restart → `.bak`) / doctor.
+    `update -f` (graceful stop → replace → restart → `.bak`).
 - **CI** runs format + vet + build + test + race + android cross-compile + smoke.
 - Development commands: `make build` (host), `make android`, `make test`, `make check` (full gate), `make tidy`, `make clean`.
 
@@ -689,7 +688,7 @@ Manual release: `git tag v0.1.0 && git push origin v0.1.0`.
 | Core features | built into nasd | low memory, single process, Termux-friendly, simple deployment |
 | Management | single script nas.sh (SIGTERM / health / direct logs) | no extra Go admin binary; zero-programming ops |
 | Responsibility ownership | nas.sh manages only the main frame; nasd fully owns plugins (Web UI) | one management entry point, consistent operations, no dual state |
-| Process supervision | flock single-instance lock + nas.sh resident supervisor (self-detached at start) | prevents dual-instance races; the supervisor keeps nasd's parent alive — the system SIGKILLs orphaned (PPID=1) processes within seconds (Android/CN-ROM observed, see FAQ) |
+| Process supervision | flock single-instance lock + foreground run (nasd is this script's child; interactive shell→nas.sh→nasd all alive) | prevents dual-instance races; the foreground model inherently avoids the system SIGKILLing orphaned (PPID=1) processes (setsid / tmux / self-detached supervisors all observed killed, see FAQ) |
 | Plugin memory | lazy load + idle reap | resident memory doesn't grow with plugin count |
 | Communication | user-channel HTTP :7531 (only exposure) | no local admin socket, minimal attack surface |
 | SQLite driver | modernc.org/sqlite (pure Go) | `CGO_ENABLED=0` static builds work without a C toolchain on Termux |
@@ -740,11 +739,13 @@ A: `nas.sh update` keeps the most recent `bin/nasd.bak`; roll it back manually (
 **Q: `nas.sh start` reports success but nasd disappears within seconds (no log), while a manual `nohup` keeps running.**
 A: This is the system reclaiming **orphan processes**: Android / many CN ROMs SIGKILL any process whose
 parent has exited (PPID=1). A same-UID process can signal it without root; nasd is SIGKILLed before it can
-write a log, so it looks like a silent exit. A manual `nohup ... &` survives only because the interactive shell
-stays alive as its parent. `nas.sh start` now handles this: on an interactive terminal (Linux/Termux) it detaches a
-**resident supervisor** (`NAS_SUPERVISOR=1 nohup bash nas.sh start`) that stays alive as nasd's parent and exits
-by itself once nasd stops; in no-tty environments (CI) it keeps the old synchronous start. Verify by swiping away
-Termux / closing the SSH session, then `bash nas.sh status` should still show running.
+write a log, so it looks like a silent exit. Empirically every "backgrounding" approach was killed on device:
+`setsid`, tmux daemonization (its server is also PPID=1), and a self-detached supervisor — the only thing that
+works is an **always-alive parent chain**. So nas.sh uses the **foreground model**: `bash nas.sh start` blocks,
+nasd runs as this script's child (interactive shell → nas.sh → nasd all alive), logs stream to the window, and
+Ctrl+C stops it gracefully; for a detached session use `nohup bash nas.sh start &` (the parent chain must stay
+alive). To survive Android-level reclamation of the whole app, you still need `termux-wake-lock`, battery
+optimization whitelisting, and not swiping Termux away.
 
 **Q: Where is my data?**
 A: Everything is under `~/nas/`: `data/nas.db` (sessions/shares/backup jobs), `data/config.json`, `files/`.
@@ -756,5 +757,5 @@ A: Yes — `make build`, then `NAS_ROOT=/tmp/nas ./bin/nasd -root /tmp/nas`; man
 (single-instance uses a mutex) — full test coverage needs Linux/WSL2/Termux.
 
 ---
-*Generated from a full analysis of the repository at the time of writing (README v2.x, nas.sh 2.1.0,
+*Generated from a full analysis of the repository at the time of writing (README v2.x, nas.sh 3.0.0,
 Go modules per go.mod).*

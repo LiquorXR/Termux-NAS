@@ -4,8 +4,8 @@
 # 主程序为单一二进制 nasd(nasm 已移除)。分两层:
 #   A. 机制断言(所有 bash 环境可跑):目录结构 / 下载 / SHA256 校验门禁 /
 #      .bak 备份 / 同版本跳过 / 强制替换 / 篡改拒绝 / 卸载保护与清理
-#   B. 运行时断言(仅 Linux/WSL/Termux):start/status/log/restart/stop、
-#      运行中 update(优雅停止/重启/回滚)、健康端口、doctor
+#   B. 运行时断言(仅 Linux/WSL/Termux):start(后台化)/status/log/restart/stop、
+#      运行中 update(优雅停止/重启/回滚)、健康端口
 # 在非 Linux(如 Windows Git Bash)运行会跳过 B 并提示,不报错。
 #
 # 依赖: Go 工具链(构建测试产物)、bash、curl、sha256sum、cygpath(Linux 可无)
@@ -119,30 +119,36 @@ ok "uninstall -y 清理完成"
 
 # ---------- 7. 运行时(B 层,仅 Linux) ----------
 if [ "$IS_LINUX" = "1" ]; then
+  wait_nasd_up() {
+    local i
+    for i in $(seq 1 40); do
+      curl -sf -o /dev/null "http://127.0.0.1:7531/health" && return 0
+      sleep 0.5
+    done
+    return 1
+  }
+
   step "运行时: start → status → log → health → restart → stop"
   export NAS_DIST_URL="$DIST_URL_FILE" NAS_ROOT="$SMOKE/nas"
   bash "$ROOT/nas.sh" install >/dev/null 2>&1 || { bad "重新 install 失败"; exit 1; }
-  bash "$ROOT/nas.sh" start || { bad "start 失败"; exit 1; }
-  sleep 2
+  # start 为前台阻塞命令:置于后台运行,轮询健康端口确认就绪
+  nohup bash "$ROOT/nas.sh" start >/dev/null 2>&1 &
+  wait_nasd_up || { bad "start 后 health 未就绪"; exit 1; }
   bash "$ROOT/nas.sh" status || { bad "status 失败"; exit 1; }
   bash "$ROOT/nas.sh" log -n 5 || { bad "log 失败"; exit 1; }
   curl -sf -o /dev/null "http://127.0.0.1:7531/health" || { bad "health 探活失败"; exit 1; }
   ok "start/status/log/health 正常"
-  bash "$ROOT/nas.sh" restart || { bad "restart 失败"; exit 1; }
-  sleep 1
+  nohup bash "$ROOT/nas.sh" restart >/dev/null 2>&1 &
+  wait_nasd_up || { bad "restart 后 health 未就绪"; exit 1; }
   bash "$ROOT/nas.sh" status >/dev/null || { bad "restart 后 status 失败"; exit 1; }
   ok "restart 正常"
 
   step "运行时: 运行中 update -f(优雅停止→替换→重启)"
-  bash "$ROOT/nas.sh" update -f || { bad "运行中 update -f 失败"; exit 1; }
-  sleep 1
+  nohup bash "$ROOT/nas.sh" update -f >/dev/null 2>&1 &
+  wait_nasd_up || { bad "更新后 health 未就绪"; exit 1; }
   bash "$ROOT/nas.sh" status >/dev/null || { bad "更新后状态异常"; exit 1; }
   [ -f "$NAS_ROOT/bin/nasd.bak" ] || { bad "运行中更新未留下 .bak"; exit 1; }
   ok "运行中更新正常(停止+替换+重启,保留 .bak)"
-
-  step "运行时: doctor 体检(在 nasd 运行中执行,健康探活才有意义)"
-  bash "$ROOT/nas.sh" doctor || { bad "doctor 失败"; exit 1; }
-  ok "doctor 体检通过"
 
   bash "$ROOT/nas.sh" stop || { bad "stop 失败"; exit 1; }
   sleep 1

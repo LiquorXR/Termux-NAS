@@ -20,7 +20,7 @@
 在 Termux 中构建一个**可插拔的移动端 NAS 系统**:
 
 - **高性能、低资源占用**:主框架为 Go 单二进制,常驻内存约 15-30MB
-- **完全兼容移动端 Termux**:无 root 可用,高位端口,nohup 后台守护
+- **完全兼容移动端 Termux**:无 root 可用,高位端口,前台运行守护
 - **可扩展**:核心功能内建,扩展功能以独立二进制插件形式动态加载
 - **易管理**:一键脚本(nas.sh)负责主框架 nasd 的生命周期(安装/更新/启停/状态/日志/卸载);插件的一切操作由主框架(nasd)统一控制
 
@@ -68,7 +68,7 @@
 | 组件 | 形态 | 职责 | 常驻 |
 |------|------|------|------|
 | **nas.sh** | bash 脚本(仓库根) | 主框架全生命周期:安装/更新/启停/状态/日志/卸载 | 否(用完即走) |
-| **nasd** | 守护进程二进制 | 运行时全部能力:HTTP 服务、内建 NAS 功能、**插件全权管理** | 是(nas.sh 常驻监督) |
+| **nasd** | 守护进程二进制 | 运行时全部能力:HTTP 服务、内建 NAS 功能、**插件全权管理** | 是(前台运行) |
 | **插件** | 独立二进制 | 扩展功能:下载/云盘/媒体等;生命周期完全由 nasd 控制 | 按需(懒加载) |
 
 > **职责单点原则**:插件的安装、卸载、启停、更新**只能**通过 nasd(Web UI 的「插件管理」页或用户通道 API)操作,nas.sh 不感知插件存在。nas.sh 与插件之间不存在任何直接交互。
@@ -119,9 +119,8 @@
 ```
 bash nas.sh install             # 安装
 bash nas.sh update [-f] [版本]    # 更新到最新(或指定 v<版本>)
-bash nas.sh start|stop|restart   # 启动/优雅停止/重启
+bash nas.sh start|stop|restart   # 前台启动(日志直打)/优雅停止/重启
 bash nas.sh status|log [-n N]    # 状态/日志尾部
-bash nas.sh doctor               # 环境体检
 bash nas.sh uninstall [-y]       # 卸载(需 -y 才删数据)
 bash nas.sh self-update          # 更新 nas.sh 自身
 ```
@@ -158,7 +157,8 @@ bash nas.sh self-update          # 更新 nas.sh 自身
 ### 5.1 进程生命周期
 
 ```
-启动:bash nas.sh start(自动分离常驻监督进程,保持 nasd 父进程存活,防孤儿被回收)
+启动:bash nas.sh start(前台运行,日志直打窗口,nasd 父进程=交互会话天然存活;
+      Ctrl+C 优雅停止;脱离终端用 nohup bash nas.sh start &)
 运行:nasd 启动(flock 单实例锁)→ 加载配置 → 打开 SQLite → 扫描插件(登记,不启动)
      → 启动 HTTP :7531(/health 供探活)
 停止:SIGTERM → 逐个停止插件 → 关闭 HTTP(超时)→ 释放单实例锁 → 退出
@@ -388,7 +388,6 @@ bash nas.sh status            # 状态
 bash nas.sh log -n 50         # 日志
 bash nas.sh update            # 更新到最新 Release(优雅停止→替换→重启→回滚)
 bash nas.sh update 0.2.0      # 更新到指定版本
-bash nas.sh doctor            # 体检
 bash nas.sh uninstall -y      # 卸载(需 -y 才删数据)
 ```
 
@@ -406,7 +405,7 @@ pkg install golang termux-api
 cd ~/nas/src && CGO_ENABLED=0 go build -ldflags="-s -w" -o ../bin/nasd ./cmd/nasd
 
 # 启动
-bash ../nas.sh start            # 后台启动(监督进程托管)
+bash ../nas.sh start            # 前台启动(日志直打,Ctrl+C 优雅停止)
 
 # 权限与保活
 # - 电池设置:Termux 加入"不限制后台"
@@ -425,6 +424,6 @@ bash ../nas.sh start            # 后台启动(监督进程托管)
 | 核心功能归属 | 内建在 nasd | 低内存、单进程、Termux 友好、部署简单 |
 | 管理方式 | 单一脚本 nas.sh(SIGTERM/health/日志直读) | 无需额外 Go 管理二进制;零编程能力即可运维 |
 | **职责单点** | **nas.sh 只管理主框架生命周期;插件全权由 nasd 控制(Web UI)** | 单一管理入口,避免两套命令/两处状态,操作一致性好 |
-| 进程守护 | 单实例锁(flock)+ nas.sh 常驻监督进程(启动时自我分离) | 防双实例竞态;监督进程保持 nasd 父进程存活——Android/国产 ROM 会秒级 SIGKILL 孤儿进程(PPID=1),详见 GUIDE FAQ |
+| 进程守护 | 单实例锁(flock)+ 前台运行(start 常驻为 nasd 父进程) | 防双实例竞态;前台运行时父进程链 交互 shell→nas.sh→nasd 全存活,天然避免 Android/国产 ROM 对孤儿进程(PPID=1)的秒级回收(详见 GUIDE FAQ) |
 | 插件内存策略 | 懒加载 + 空闲回收 | 常驻内存不随插件数量增长 |
 | 通信协议 | 用户通道 HTTP :7531(唯一对外) | 无本地管理 socket,精简暴露面 |

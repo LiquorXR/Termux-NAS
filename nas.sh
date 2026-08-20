@@ -2,22 +2,23 @@
 # =============================================================================
 # nas.sh — Termux NAS 一键部署与管理脚本(仓库根目录)
 #
-# 主程序为单一二进制 nasd;本脚本全周期管理其生命周期:
-#   安装 / 更新 / 启动 / 停止 / 重启 / 状态 / 日志 / 卸载。
+# 主程序为单一二进制 nasd;本脚本提供交互式菜单与命令面:
+#   菜单:启动(前台) / 安装更新 / 卸载 / 退出。
 #
 # 管理方式(无需任何 Go 管理工具):
-#   - 启动:自动分离常驻监督进程 + nohup 拉起 nasd(监督进程保持父进程存活,
-#     防 Android/ROM 回收孤儿进程;错误输出落盘 data/logs/nasd.stderr.log 便于排错)
+#   - 启动:前台运行(nasd 作为本脚本子进程,父进程链 交互 shell→nas.sh→nasd 全存活,
+#     天然避免 Android/ROM 对孤儿进程(PPID=1)的秒级回收;日志直打窗口,
+#     Ctrl+C 优雅停止;脱离终端用 nohup bash nas.sh start &)
 #   - 停止:SIGTERM 优雅停止(等进程退出,超时再 SIGKILL)
 #   - 探活:HTTP /health(endpoint)+ 单实例锁 pid(run/nas.lock)
-#   - 日志:直读 data/logs/nasd.log 尾部
+#   - 日志:直读 data/logs/nasd.log 尾部(前台运行时直接窗口打印)
 #   - 更新:下载→SHA256 校验→优雅停止→原子替换(.bak)→重启→失败回滚
 #
 # 用法:
+#   bash nas.sh [menu]               # 交互式菜单(默认)
 #   bash nas.sh install              # 安装
 #   bash nas.sh update [-f] [版本]    # 更新到最新(或指定 v<版本>)
-#   bash nas.sh start | stop | restart | status [-json] | log [-n N]
-#   bash nas.sh doctor                # 环境体检
+#   bash nas.sh start | stop | restart | status | log [-n N]
 #   bash nas.sh uninstall [-y]        # 卸载(默认只打印计划,需 -y 才删除数据)
 #   bash nas.sh self-update           # 更新本脚本自身
 #   bash nas.sh help | version        # 帮助 / 版本
@@ -33,7 +34,7 @@
 # =============================================================================
 set -euo pipefail
 
-NAS_SCRIPT_VERSION="2.1.0"
+NAS_SCRIPT_VERSION="3.0.0"
 NAS_ROOT="${NAS_ROOT:-$HOME/nas}"
 NAS_REPO="${NAS_REPO:-LiquorXR/Termux-NAS}"
 NAS_MIRROR="${NAS_MIRROR:-https://ghfast.top/}"
@@ -46,6 +47,7 @@ ASSET_SUMS="sha256sums.txt"
 # 全局清理(EXIT 陷阱兜底:任何 die/中断都保证清理临时目录与操作锁)
 NAS_TMP=""
 NAS_LOCKDIR=""
+NAS_START_PID=""   # 前台启动的 nasd 子进程 pid(供 block_until_exit 阻塞等待)
 _nas_exit() {
   [ -n "$NAS_TMP" ]     && rm -rf "$NAS_TMP"
   [ -n "$NAS_LOCKDIR" ] && rmdir "$NAS_LOCKDIR" 2>/dev/null || true
@@ -273,60 +275,36 @@ wait_ready() {
   return 1
 }
 
-start_nasd() {
+# 前台启动 nasd:nasd 作为本脚本的子进程运行(父进程链 交互 shell→nas.sh→nasd
+# 全部存活,天然避免 Android/ROM 对孤儿进程(PPID=1)的秒级回收)。
+# 日志由 nasd 直接写 stderr → 窗口直打,同时落盘 data/logs/nasd.log。
+cmd_start() {
+  NAS_START_PID=""
+  [ -s "$(nasd_bin)" ] || die "未安装 nasd,请先 bash nas.sh install"
   ensure_dirs
   if is_running; then
-    info "nasd 已在运行"
+    info "nasd 已在运行(pid $(nasd_pids | head -n1)),无需重复启动"
     return 0
   fi
-
-  # 后台拉起(nasd 自身写 data/logs/nasd.log;stderr 落盘以便启动失败排查)
-  info "后台启动 nasd..."
-  local stderr_log="$NAS_ROOT/data/logs/nasd.stderr.log"
-  if command -v nohup >/dev/null 2>&1; then
-    nohup "$(nasd_bin)" -root "$NAS_ROOT" >>"$stderr_log" 2>&1 < /dev/null &
-  else
-    "$(nasd_bin)" -root "$NAS_ROOT" >>"$stderr_log" 2>&1 < /dev/null &
-  fi
-  if wait_ready 30; then
-    info "nasd 已启动(pid $(nasd_pids | head -n1))"
-  else
-    err "nasd 启动超时(健康检查未通过),请查看日志: $(log_path) 与 $stderr_log"
-  fi
+  info "启动 nasd..."
+  "$(nasd_bin)" -root "$NAS_ROOT" &
+  NAS_START_PID=$!
+  info "nasd 已启动(pid $NAS_START_PID),日志打印本窗口"
 }
 
-cmd_start() {
-  [ -s "$(nasd_bin)" ] || die "未安装 nasd,请先 bash nas.sh install"
-  # 交互终端(Linux/Termux):自我分离为常驻监督进程,保持 nasd 父进程存活。
-  # 背景:Android/部分 ROM 会秒级 SIGKILL 父进程已退出的孤儿进程(实测 PPID=1 的
-  # nasd 实例无一存活,父进程常驻则稳定运行),故监督进程不能随脚本退出。
-  if [ "${NAS_SUPERVISOR:-}" != "1" ] && is_linux && [ -t 1 ]; then
-    if is_running; then
-      info "nasd 已在运行"
-      return 0
-    fi
-    NAS_SUPERVISOR=1 nohup bash "$0" start >/dev/null 2>&1 &
-    if wait_ready 30; then
-      info "nasd 已启动(监督进程 pid $!,nasd 由其托管;停止: bash nas.sh stop)"
-    else
-      warn "监督进程已分离但健康检查未通过,请查看日志: $(log_path)"
-    fi
-    return 0
-  fi
-  start_nasd
-  # 监督模式:保持为 nasd 的活父进程,直到 nasd 退出(防孤儿进程被系统回收)
-  if [ "${NAS_SUPERVISOR:-}" = "1" ]; then
-    local pid
-    while :; do
-      pid="$(nasd_pids | head -n1)"
-      if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
-        sleep 5
-      else
-        break
-      fi
-    done
-  fi
+# 前台阻塞:本进程保持为 nasd 的活父进程并等待其退出。
+# Ctrl+C(SIGINT)/SIGTERM 转发给 nasd → nasd 优雅停止 → 本函数返回(回到菜单/命令结束)。
+# 脱离终端常驻请用: nohup bash nas.sh start &(父链 交互 shell→nas.sh→nasd 需保持存活)。
+block_until_exit() {
+  local pid="${NAS_START_PID:-}"
+  [ -n "$pid" ] || return 0
+  trap 'kill -INT "$pid" 2>/dev/null || true' INT TERM
+  printf '%s\n' "前台运行中… 日志直打本窗口;Ctrl+C 优雅停止;脱离终端用 nohup bash nas.sh start &"
+  wait "$pid" || true
+  trap - INT TERM
+  info "nasd 已退出(pid $pid)"
 }
+
 cmd_stop()    { [ -s "$(nasd_bin)" ] || { info "nasd 未安装,无需停止"; return; }; stop_nasd; }
 cmd_restart() { cmd_stop; cmd_start; }
 
@@ -421,43 +399,26 @@ cmd_update() {
   info "二进制已替换(v$(probe_version "$(nasd_bin)"))"
 
   if [ "$was_running" = "1" ]; then
-    # 原运行中 → 重启并健康检查;失败自动回滚
-    info "重启 nasd..."
-    cmd_start || {
+    # 原运行中 → 重启并健康检查;失败自动回滚。
+    # 先输出完成信息与旧版保留提示,再前台阻塞启动,避免消息被阻塞在后台。
+    if [ -f "$(nasd_bin).bak" ]; then
+      info "旧版已保留: nasd.bak(如需回滚: 替换回 bin/nasd 后重启)"
+    fi
+    info "nasd 更新完成: v$(probe_version "$(nasd_bin)"),正在前台启动…"
+    cmd_start
+    if ! wait_ready 30; then
       warn "新版启动失败,回滚到 .bak 版本"
       stop_nasd
       [ -f "$(nasd_bin).bak" ] && mv -f "$(nasd_bin).bak" "$(nasd_bin)"
       chmod +x "$(nasd_bin)"
-      cmd_start || die "回滚后仍无法启动,请查看日志: $(log_path)"
+      cmd_start
+      wait_ready 30 || die "回滚后仍无法启动,请查看日志: $(log_path)"
       die "已回滚到旧版本 v$(probe_version "$(nasd_bin)")"
-    }
-    info "nasd 更新完成: v$(probe_version "$(nasd_bin)")"
-    # 保留最近一份旧版 .bak 便于手动回滚(每次更新仅覆盖同名文件,体积有界)
-    if [ -f "$(nasd_bin).bak" ]; then
-      info "旧版已保留: nasd.bak(如需回滚: 替换回 bin/nasd 后重启)"
     fi
   else
     info "更新完成(未启动),可执行 bash nas.sh start"
   fi
   NAS_TMP=""; rm -rf "$tmp"
-}
-
-# ---------------- 体检 ----------------
-cmd_doctor() {
-  info "体检报告(部署根: $NAS_ROOT)"
-  local ok=0 bad=0 port
-  port="$(config_port)"
-  check() {
-    if eval "$2" >/dev/null 2>&1; then info "  [✓] $1"; ok=$((ok+1)); else warn "  [✗] $1"; bad=$((bad+1)); fi
-  }
-  require_cmds
-  check "目录结构"                        "ensure_dirs"
-  check "nasd 二进制存在"                 "[ -s \"\$(nasd_bin)\" ]"
-  check "nasd 可执行(版本探测)"           "( [ -s \"\$(nasd_bin)\" ] && probe_version \"\$(nasd_bin)\" >/dev/null )"
-  check "HTTP 健康(:$port)"               "health_up"
-  df -h "$NAS_ROOT" 2>/dev/null | tail -1 | awk '{ print "  [i] 磁盘: " $4 " 可用 / " $2 " 总量(" $5 " 已用)" }' || true
-  info "检查完成: $ok 项通过, $bad 项异常"
-  [ "$bad" = "0" ] || err "存在异常项,请按上方提示处理"
 }
 
 # ---------------- 卸载 ----------------
@@ -497,27 +458,91 @@ cmd_self_update() {
   info "脚本已更新为最新版(旧版备份: $0.bak),请重新执行 nas.sh"
 }
 
+# ---------------- 交互式菜单 ----------------
+menu() {
+  local choice
+  while :; do
+    echo
+    echo "Termux NAS 管理"
+    echo "--------------------------------"
+    if is_running; then
+      echo "状态: 运行中   PID $(nasd_pids | head -n1)   端口 $(config_port)"
+    else
+      echo "状态: 未运行"
+      if [ -s "$(nasd_bin)" ] && is_linux; then
+        echo "版本: v$(probe_version "$(nasd_bin)")"
+      fi
+    fi
+    echo "--------------------------------"
+    echo " 1) 启动(前台运行,日志直打,Ctrl+C 优雅停止)"
+    echo " 2) 安装 / 更新"
+    echo " 3) 卸载"
+    echo " 0) 退出"
+    printf '选择: '
+    read -r choice || break
+    case "$choice" in
+      1)
+        if [ ! -s "$(nasd_bin)" ]; then
+          warn "未安装 nasd,请先选择 2 安装"
+        else
+          mutex cmd_start
+          block_until_exit
+        fi
+        ;;
+      2)
+        if [ -s "$(nasd_bin)" ]; then
+          mutex cmd_update
+          block_until_exit
+        else
+          ( mutex cmd_install ) || warn "安装失败,请检查网络"
+        fi
+        ;;
+      3) menu_uninstall ;;
+      0|q|Q) break ;;
+      *) warn "无效选择: $choice" ;;
+    esac
+  done
+  echo "再见"
+}
+
+menu_uninstall() {
+  echo "卸载计划:"
+  echo "  1. 停止 nasd(如运行中)"
+  echo "  2. 删除部署根 $NAS_ROOT(含 data 数据库、files、plugins、bin——不可恢复)"
+  printf '确认卸载?输入 y 确认: '
+  local a
+  read -r a || return 1
+  if [ "$a" != "y" ]; then
+    info "已取消卸载"
+    return 0
+  fi
+  mutex cmd_uninstall -y
+}
+
 # ---------------- 帮助 ----------------
 usage() {
   cat <<'EOF'
 Termux NAS 一键管理脚本(nas.sh)
 
-主程序为单一二进制 nasd;本脚本全周期管理其安装/更新/启停/状态/日志/卸载。
+主程序为单一二进制 nasd;本脚本提供交互式菜单与命令面。
 
 用法:
-  bash nas.sh install             安装:建目录→拉取 Release 二进制→SHA256 校验→
-                                   赋予可执行权限
-  bash nas.sh update [-f] [版本]   更新到最新(或指定 v<版本>):
-                                   下载→校验→优雅停止→原子替换(.bak)→重启→失败回滚
-  bash nas.sh start                启动 nasd(自动分离监督进程托管,后台运行)
-  bash nas.sh stop                 优雅停止 nasd(SIGTERM,超时强制结束)
-  bash nas.sh restart              重启 nasd
-  bash nas.sh status               查看运行状态(版本/PID/Uptime/端口)
-  bash nas.sh log [-n 行数]         查看主框架日志尾部(默认 50 行)
-  bash nas.sh doctor               环境体检(二进制/目录/健康端口/磁盘)
-  bash nas.sh uninstall [-y]       卸载(需 -y 才真正删除数据)
-  bash nas.sh self-update          更新脚本自身
-  bash nas.sh help | version       帮助 / 脚本版本
+  bash nas.sh [menu]                交互式菜单(默认):
+                                      1) 启动(前台运行,日志直打,Ctrl+C 优雅停止)
+                                      2) 安装 / 更新
+                                      3) 卸载
+                                      0) 退出
+  bash nas.sh install               安装:建目录→拉取 Release 二进制→SHA256 校验→落盘
+  bash nas.sh update [-f] [版本]     更新:下载→校验→优雅停止→原子替换(.bak)→重启→失败回滚
+  bash nas.sh start                 前台启动 nasd(阻塞;Ctrl+C 优雅停止;
+                                      脱离终端用 nohup bash nas.sh start &)
+  bash nas.sh stop                  优雅停止 nasd(SIGTERM,超时强制结束)
+  bash nas.sh restart               重启 nasd(停止后前台启动)
+  bash nas.sh status                查看运行状态(版本/PID/Uptime/端口)
+  bash nas.sh log [-n 行数]          查看主框架日志尾部(默认 50 行)
+  bash nas.sh uninstall [-y]        卸载(需 -y 才真正删除数据)
+  bash nas.sh self-update           更新脚本自身
+  bash nas.sh help | version        帮助 / 脚本版本
 
 环境变量:
   NAS_ROOT      部署根(默认 $HOME/nas)
@@ -549,22 +574,22 @@ mutex() {
 main() {
   require_cmds
   detect_arch
-  local cmd="${1:-help}"
+  local cmd="${1:-menu}"
   shift || true
 
   case "$cmd" in
+    menu|"")        menu ;;
     install|setup)  mutex cmd_install "$@" ;;
-    update)         mutex cmd_update "$@" ;;
-    start)          if [ "${NAS_SUPERVISOR:-}" = "1" ]; then cmd_start; else mutex cmd_start; fi ;;
+    update)         mutex cmd_update "$@"; block_until_exit ;;
+    start)          mutex cmd_start; block_until_exit ;;
     stop)           mutex cmd_stop ;;
-    restart)        mutex cmd_restart ;;
+    restart)        mutex cmd_restart; block_until_exit ;;
     status)         cmd_status "$@" ;;
     log)            cmd_log "$@" ;;
-    doctor|check)   cmd_doctor ;;
     uninstall)      mutex cmd_uninstall "$@" ;;
     self-update)    mutex cmd_self_update ;;
     version|-v)     echo "nas.sh $NAS_SCRIPT_VERSION" ;;
-    help|-h|--help|"") usage ;;
+    help|-h|--help) usage ;;
     *) err "未知命令: $cmd(见: bash nas.sh help)" ;;
   esac
 }
