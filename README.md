@@ -4,13 +4,15 @@
 
 - **架构**:管理模块 `nasm`(CLI)+ 主框架 `nasd`(常驻守护)+ 插件(独立二进制)
 - **技术栈**:Go + Fiber + SQLite(WAL)+ HTMX + Tailwind(daisyUI)
-- **部署环境**:Termux,无 root、高位端口、termux-services 守护
+- **部署环境**:Termux,无 root、高位端口、termux-services 守护;**一键脚本 `nas.sh`
+  安装/更新/启停,无需手机安装 Go**
 - **当前阶段**:M3 文件管理 + 系统监控(见 [里程碑](#里程碑))
 
 ## 目录结构
 
 ```
 ~/nas/                          # 单一部署根(备份 = 拷贝目录)
+├── nas.sh                      # ★ 一键部署/更新/管理脚本(Termux 首选,无需 Go 工具链)
 ├── src/                        # Go 源码(本仓库)
 │   ├── cmd/
 │   │   ├── nasm/               # 管理 CLI(只管理 nasd 生命周期)
@@ -22,9 +24,11 @@
 │   │   ├── version/            # 版本信息(构建时注入)
 │   │   └── webui/              # 嵌入前端静态资源(单二进制)
 │   ├── scripts/build.sh        # 构建脚本(host / android 交叉编译)
+│   ├── scripts/smoke-test.sh   # nas.sh 冒烟测试(机制层全平台/运行时层需 Linux)
 │   ├── termux-service/         # runit 服务脚本模板
 │   └── Makefile
-├── bin/                        # 构建产物(nasm / nasd)
+├── .github/workflows/          # CI(ci.yml)+ 发布流水线(release.yml)
+├── bin/                        # 构建产物或 nas.sh 下载的二进制(nasm / nasd)
 ├── plugins/                    # 插件二进制(M4)
 ├── data/                       # nas.db / config.json / logs/(运行时生成)
 └── run/                        # nas.sock 管理 socket(运行时生成)
@@ -46,22 +50,56 @@ NAS_ROOT=/tmp/nas ./bin/nasd -root /tmp/nas   # 启动守护进程(终端 A)
 > 开发环境(Windows)下管理通道自动退化为回环 TCP(地址写入 `run/nas.addr`);
 > 生产环境(Termux)使用 Unix socket。无需额外配置。
 
-### Termux 部署
+### Termux 部署(推荐:一键脚本,无需装 Go)
+
+在手机 Termux 里**不需要安装 Go 工具链、不需要手动拷贝文件**。`nas.sh` 会自动:
+创建 `~/nas` 目录结构 → 从 GitHub Releases 拉取 android/arm64 预编译二进制 →
+SHA256 校验 → 赋予可执行权限 → 安装(可选注册开机自启)。
 
 ```bash
-pkg install golang termux-services termux-api
-cd ~/nas/src && make android        # 交叉编译 android/arm64 静态二进制
+pkg install curl                # 首次:补齐依赖
+curl -LO https://raw.githubusercontent.com/LiquorXR/Termux-NAS/main/nas.sh
+bash nas.sh install --service   # 安装 + 注册 runit 开机自启(termux-services)
+bash nas.sh start               # 启动 nasd
+```
 
+浏览器访问 `http://<手机局域网IP>:7531`。
+
+> 首次启动 nasd 自动生成 `data/config.json`(含管理 token),随后按 Web UI
+> 引导创建管理员账号即可。
+
+**常用命令**
+
+| 命令 | 作用 |
+|------|------|
+| `bash nas.sh install [--service]` | 安装/修复(可选注册开机自启) |
+| `bash nas.sh update [-f] [版本]` | 更新到最新(或指定 `v<版本>`),自动校验/备份/回滚 |
+| `bash nas.sh start` / `stop` / `restart` | 启动 / 优雅停止 / 重启 |
+| `bash nas.sh status [-json]` / `log [-n N]` | 状态 / 查看日志尾部 |
+| `bash nas.sh doctor` | 环境体检(二进制/目录/健康端口/磁盘) |
+| `bash nas.sh uninstall [-y]` | 卸载(默认只打印计划,需 `-y` 才删除数据) |
+| `bash nas.sh self-update` | 更新 nas.sh 脚本自身 |
+
+**版本发布与更新**:推送 `v*` 标签即触发 CI 自动交叉编译并发布
+`nasm-android-arm64`、`nasd-android-arm64`、`sha256sums.txt` 三个资产。
+`bash nas.sh update` 默认更新到最新 Release;指定版本如 `bash nas.sh update 0.2.0`。
+更新全程:下载 → SHA256 校验 → 优雅停机 → 原子替换(旧版保留 `.bak`)→
+重启 → 失败自动回滚。
+
+### Termux 源码构建(贡献者/离线回退)
+
+若需自行构建(如无网络或定制),沿用旧流程(须先 `pkg install golang termux-services termux-api`):
+
+```bash
+cd ~/nas/src && make android        # 交叉编译 android/arm64 静态二进制(含前端)
+# 产物在 ../bin/,再按上面 nas.sh 的目录约定放入 bin/ 即可
 # 注册 runit 服务(详见 termux-service/nasd-run.sh 头注释)
 mkdir -p $PREFIX/var/service/nasd/log
 cp termux-service/nasd-run.sh $PREFIX/var/service/nasd/run
 chmod +x $PREFIX/var/service/nasd/run
 sv-enable nasd                      # 开机自启(Termux:Boot)
-
 nasm status                         # 或直接: sv start nasd
 ```
-
-浏览器访问 `http://<手机局域网IP>:7531`。
 
 ## 两条通信通道
 

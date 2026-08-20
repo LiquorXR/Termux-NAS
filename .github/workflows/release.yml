@@ -1,0 +1,82 @@
+# Release 流水线:推送 v* 标签时自动构建并发布 android/arm64 二进制。
+#
+# 用途(配合仓库根目录 nas.sh):
+#   - 产出资产:nasm-android-arm64 / nasd-android-arm64 / sha256sums.txt
+#   - nas.sh 通过 releases/latest/download 或 download/v<版本> 固定地址拉取
+#   - 版本号取自标签(去掉前导 v),注入 ldflags 作为二进制版本信息
+#
+# 手动发布:git tag v0.1.0 && git push origin v0.1.0
+
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write # 允许创建 Release 并上传资产
+
+jobs:
+  release:
+    name: Build & Publish android/arm64
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: src/go.mod
+          cache: true
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: src/web/package-lock.json
+
+      # go:embed 需要 src/internal/webui/dist 存在(该目录被 .gitignore 排除,
+      # 发布前必须先由 Vite 构建生成,否则 nasd 无法编译)。
+      - name: Build frontend
+        working-directory: src/web
+        run: |
+          npm ci
+          npm run build
+
+      - name: Build android/arm64 binaries
+        working-directory: src
+        env:
+          VERSION: ${{ github.ref_name }}
+        run: |
+          VERSION="${VERSION#v}"
+          COMMIT="$(git rev-parse --short HEAD)"
+          BUILD_TIME="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+          LDFLAGS="-s -w \
+            -X github.com/termux-nas/nas/internal/version.Version=${VERSION} \
+            -X github.com/termux-nas/nas/internal/version.Commit=${COMMIT} \
+            -X github.com/termux-nas/nas/internal/version.BuildTime=${BUILD_TIME}"
+          mkdir -p dist
+          for bin in nasm nasd; do
+            echo "==> 构建 ${bin} android/arm64 (v${VERSION})"
+            CGO_ENABLED=0 GOOS=android GOARCH=arm64 \
+              go build -trimpath -ldflags "$LDFLAGS" \
+              -o "dist/${bin}-android-arm64" "./cmd/${bin}"
+          done
+
+      - name: Generate checksums
+        working-directory: src/dist
+        run: sha256sum * | tee sha256sums.txt
+
+      - name: Show artifacts
+        working-directory: src/dist
+        run: |
+          ls -lh
+          cat sha256sums.txt
+
+      - name: Publish Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: src/dist/*
+          generate_release_notes: true

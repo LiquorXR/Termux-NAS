@@ -389,6 +389,36 @@ GET  /p/<plugin_id>/*           # 插件路由(反代,统一鉴权)
 
 ## 10. Termux 部署要点
 
+### 10.1 一键脚本(推荐,无需手机安装 Go)
+
+仓库根目录 `nas.sh` 自动完成:创建 `~/nas` 目录结构 → 从 GitHub Releases
+拉取 android/arm64 预编译二进制 → SHA256 校验 → 赋予可执行权限 → 安装,
+并管理 nasd 的启动/停止/重启/状态/日志与原子更新(旧版 `.bak` 备份、失败回滚)。
+
+```bash
+# 依赖(仅 base/curl;无需 golang)
+pkg install curl
+
+# 安装 + 注册 runit 开机自启
+curl -LO https://raw.githubusercontent.com/LiquorXR/Termux-NAS/main/nas.sh
+bash nas.sh install --service
+bash nas.sh start
+
+# 日常
+bash nas.sh status            # 状态
+bash nas.sh log -n 50         # 日志
+bash nas.sh update            # 更新到最新 Release(先更 nasd,后更 nasm;自动回滚)
+bash nas.sh update 0.2.0      # 更新到指定版本
+bash nas.sh doctor            # 体检
+bash nas.sh uninstall -y      # 卸载(需 -y 才删数据)
+```
+
+二进制分发:推送 `v*` 标签触发 `.github/workflows/release.yml` 自动交叉编译并发布
+`nasm-android-arm64` / `nasd-android-arm64` / `sha256sums.txt`。
+`nas.sh` 通过 `releases/latest/download`(无需 API/jq)拉取;`NAS_DIST_URL` 可覆盖为镜像。
+
+### 10.2 源码构建(贡献者 / 离线回退)
+
 ```bash
 # 依赖
 pkg install golang termux-services termux-api
@@ -401,6 +431,7 @@ cd ~/nas/src && CGO_ENABLED=0 go build -ldflags="-s -w" -o ../bin/nasm ./cmd/nas
 pkg install termux-services
 mkdir -p $PREFIX/var/service/nasd/log
 # 编写 run 脚本启动 nasd,sv-enable nasd 实现开机自启
+# (或直接使用 termux-service/nasd-run.sh 模板)
 
 # 权限与保活
 # - 电池设置:Termux 加入"不限制后台"

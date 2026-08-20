@@ -3,6 +3,7 @@ bin/
 data/
 run/
 .gopath/
+.smoke/
 
 # 构建缓存
 *.tmp
