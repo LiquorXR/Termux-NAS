@@ -6,14 +6,14 @@
 #   安装 / 更新 / 启动 / 停止 / 重启 / 状态 / 日志 / 卸载。
 #
 # 管理方式(无需任何 Go 管理工具):
-#   - 启动:runit(sv)优先,否则后台 nohup 拉起
+#   - 启动:后台 nohup 拉起
 #   - 停止:SIGTERM 优雅停止(等进程退出,超时再 SIGKILL)
 #   - 探活:HTTP /health(endpoint)+ 单实例锁 pid(run/nas.lock)
 #   - 日志:直读 data/logs/nasd.log 尾部
 #   - 更新:下载→SHA256 校验→优雅停止→原子替换(.bak)→重启→失败回滚
 #
 # 用法:
-#   bash nas.sh install [--service]  # 安装(可选注册 runit 开机自启)
+#   bash nas.sh install              # 安装
 #   bash nas.sh update [-f] [版本]    # 更新到最新(或指定 v<版本>)
 #   bash nas.sh start | stop | restart | status [-json] | log [-n N]
 #   bash nas.sh doctor                # 环境体检
@@ -197,14 +197,6 @@ is_running() {
 
 # ---------------- 安装 ----------------
 cmd_install() {
-  local service=0 a
-  for a in "$@"; do
-    case "$a" in
-      --service) service=1 ;;
-      *) err "未知参数: $a(用法: nas.sh install [--service])" ;;
-    esac
-  done
-
   ensure_dirs
   local tmp; tmp="$(mktemp -d)"; NAS_TMP="$tmp"
 
@@ -238,38 +230,9 @@ cmd_install() {
     [ -n "$vd" ] && info "二进制已验证(nasd v${vd})"
   fi
 
-  if [ "$service" = "1" ]; then
-    register_service
-  fi
-
   info "安装完成。部署根: $NAS_ROOT"
   info "下一步: bash nas.sh start;浏览器访问 http://<本机局域网IP>:$(config_port)"
   info "提示: 首次启动 nasd 自动生成 data/config.json(默认端口 $PORT_DEFAULT)。"
-}
-
-# runit 服务注册(Termux:termux-services);依赖 $PREFIX
-register_service() {
-  if [ -z "${PREFIX:-}" ]; then
-    warn "未检测到 Termux 环境(\$PREFIX 为空),跳过服务注册(开发机可忽略)"
-    return
-  fi
-  if ! command -v sv-enable >/dev/null 2>&1; then
-    warn "未安装 termux-services(sv-enable 不可用),跳过服务注册(pkg install termux-services)"
-    return
-  fi
-  local sd="$PREFIX/var/service/nasd"
-  if ! { mkdir -p "$sd" \
-      && printf '#!%s/bin/sh\nexport NAS_ROOT="%s"\nexec "%s/bin/nasd" -root "%s"\n' \
-           "$PREFIX" "$NAS_ROOT" "$NAS_ROOT" "$NAS_ROOT" > "$sd/run" \
-      && chmod +x "$sd/run"; }; then
-    warn "写入 $PREFIX/var/service/nasd 失败(权限?),跳过服务注册"
-    return
-  fi
-  if sv-enable nasd 2>/dev/null || sv enable nasd 2>/dev/null; then
-    info "runit 服务已注册并启用: nasd(开机自启)"
-  else
-    warn "sv-enable 失败,请稍后手动执行: sv-enable nasd"
-  fi
 }
 
 # ---------------- 生命周期 ----------------
@@ -314,16 +277,6 @@ start_nasd() {
   if is_running; then
     info "nasd 已在运行"
     return 0
-  fi
-
-  # runit 优先(install --service 注册过)
-  if [ -n "${PREFIX:-}" ] && [ -x "$PREFIX/var/service/nasd/run" ] \
-     && command -v sv >/dev/null 2>&1; then
-    if sv start nasd 2>/dev/null && wait_ready 30; then
-      info "nasd 已启动(runit)"
-      return 0
-    fi
-    warn "sv start 未就绪,退回后台直启"
   fi
 
   # 后台拉起(nasd 自身写 data/logs/nasd.log)
@@ -480,27 +433,18 @@ cmd_uninstall() {
   for a in "$@"; do
     case "$a" in
       -y|--yes) yes=1 ;;
-      --service) service=1 ;;
-      *) err "未知参数: $a(用法: nas.sh uninstall [-y] [--service])" ;;
+      *) err "未知参数: $a(用法: nas.sh uninstall [-y])" ;;
     esac
   done
 
   echo "卸载计划:"
   echo "  1. 停止 nasd(如运行中)"
   echo "  2. 删除部署根 $NAS_ROOT(含 data 数据库、files、plugins、bin——不可恢复)"
-  if [ "$service" = "1" ] && [ -n "${PREFIX:-}" ]; then
-    echo "  3. 移除 runit 服务 $PREFIX/var/service/nasd"
-  fi
   if [ "$yes" != "1" ]; then
     die "未确认卸载:请加 -y 确认执行(-y 将真正删除全部数据)"
   fi
 
   cmd_stop
-  if [ "$service" = "1" ] && [ -n "${PREFIX:-}" ]; then
-    command -v sv-disable >/dev/null 2>&1 && sv-disable nasd 2>/dev/null || true
-    rm -rf "$PREFIX/var/service/nasd"
-    info "runit 服务已移除"
-  fi
   rm -rf "$NAS_ROOT"
   info "已删除 $NAS_ROOT"
 }
@@ -528,17 +472,17 @@ Termux NAS 一键管理脚本(nas.sh)
 主程序为单一二进制 nasd;本脚本全周期管理其安装/更新/启停/状态/日志/卸载。
 
 用法:
-  bash nas.sh install [--service]  安装:建目录→拉取 Release 二进制→SHA256 校验→
-                                   赋予可执行权限(可选:注册 runit 开机自启)
+  bash nas.sh install             安装:建目录→拉取 Release 二进制→SHA256 校验→
+                                   赋予可执行权限
   bash nas.sh update [-f] [版本]   更新到最新(或指定 v<版本>):
                                    下载→校验→优雅停止→原子替换(.bak)→重启→失败回滚
-  bash nas.sh start                启动 nasd(runit 优先,否则后台 nohup)
+  bash nas.sh start                启动 nasd(后台 nohup)
   bash nas.sh stop                 优雅停止 nasd(SIGTERM,超时强制结束)
   bash nas.sh restart              重启 nasd
   bash nas.sh status               查看运行状态(版本/PID/Uptime/端口)
   bash nas.sh log [-n 行数]         查看主框架日志尾部(默认 50 行)
   bash nas.sh doctor               环境体检(二进制/目录/健康端口/磁盘)
-  bash nas.sh uninstall [-y] [--service]  卸载(需 -y 才真正删除数据)
+  bash nas.sh uninstall [-y]       卸载(需 -y 才真正删除数据)
   bash nas.sh self-update          更新脚本自身
   bash nas.sh help | version       帮助 / 脚本版本
 
@@ -551,7 +495,7 @@ Termux NAS 一键管理脚本(nas.sh)
 
 一键体验:
   curl -LO https://raw.githubusercontent.com/LiquorXR/Termux-NAS/main/nas.sh
-  bash nas.sh install --service && bash nas.sh start
+  bash nas.sh install && bash nas.sh start
 EOF
 }
 
