@@ -24,3 +24,4 @@ Thumbs.db
 src/web/node_modules/
 src/internal/webui/dist/
 .opencode/
+design-drafts

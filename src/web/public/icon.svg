@@ -1,6 +1,8 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 192">
-  <rect width="192" height="192" rx="36" fill="#0c0e13"/>
-  <rect x="36" y="36" width="120" height="120" rx="20" fill="none" stroke="#5b8cff" stroke-width="10"/>
-  <circle cx="96" cy="96" r="22" fill="#5b8cff"/>
-  <path d="M60 96h20M112 96h20" stroke="#5b8cff" stroke-width="10" stroke-linecap="round"/>
+  <rect width="192" height="192" rx="36" fill="#05060a"/>
+  <!-- Nocturne: layered cube outline -->
+  <path d="M96 28 L156 64 L156 128 L96 164 L36 128 L36 64 Z" fill="none" stroke="#5b8cff" stroke-width="10" stroke-linejoin="round" opacity=".95"/>
+  <path d="M36 64 L96 100 L156 64" fill="none" stroke="#5b8cff" stroke-width="8" stroke-linecap="round" stroke-linejoin="round" opacity=".9"/>
+  <path d="M96 100 L96 164" fill="none" stroke="#5b8cff" stroke-width="8" stroke-linecap="round"/>
+  <circle cx="96" cy="102" r="20" fill="#5b8cff"/>
 </svg>

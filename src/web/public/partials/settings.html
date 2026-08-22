@@ -1,26 +1,26 @@
 <div class="card">
   <h2>设置</h2>
-  <p>系统信息与通用设置。</p>
+  <p style="color:var(--muted);font-size:13px">系统信息与通用设置。</p>
 
   <div class="set-sec-title">外观</div>
   <div class="set-row">
     <span>主题</span>
-    <div class="seg" id="st-theme">
-      <button type="button" data-theme-opt="system">跟随系统</button>
-      <button type="button" data-theme-opt="dark">深色</button>
-      <button type="button" data-theme-opt="light">浅色</button>
+    <div class="seg" id="st-theme" role="radiogroup" aria-label="主题选择">
+      <button type="button" data-theme-opt="system" role="radio" aria-checked="false">跟随系统</button>
+      <button type="button" data-theme-opt="dark" role="radio" aria-checked="false">深色</button>
+      <button type="button" data-theme-opt="light" role="radio" aria-checked="false">浅色</button>
     </div>
   </div>
 
   <div class="set-sec-title">系统信息</div>
-  <div class="set-row"><span>版本</span><span class="set-val" id="st-version">…</span></div>
+  <div class="set-row"><span>版本</span><span class="set-val" id="st-version" aria-live="polite">…</span></div>
   <div class="set-row"><span>提交</span><span class="set-val" id="st-commit">…</span></div>
   <div class="set-row"><span>构建时间</span><span class="set-val" id="st-build">…</span></div>
   <div class="set-row"><span>平台</span><span class="set-val" id="st-platform">…</span></div>
   <div class="set-row"><span>主机名</span><span class="set-val" id="st-host">…</span></div>
 
   <div class="set-sec-title">存储</div>
-  <div class="set-row"><span>磁盘占用</span><span class="set-val" id="st-disk">…</span></div>
+  <div class="set-row"><span>磁盘占用</span><span class="set-val" id="st-disk" aria-live="polite">…</span></div>
 
   <div class="set-sec-title">安全</div>
   <div class="set-row"><span>修改密码</span><span class="set-val" style="color:var(--muted)">敬请期待</span></div>
@@ -29,10 +29,11 @@
 
 <script>
 (function () {
+  function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
   function load() {
     Promise.all([
-      fetch('/api/version').then(function (r) { return r.json(); }),
-      fetch('/api/monitor/summary').then(function (r) { return r.json(); })
+      fetch('/api/version', {credentials:'same-origin'}).then(function (r) { return r.json(); }),
+      fetch('/api/monitor/summary', {credentials:'same-origin'}).then(function (r) { return r.json(); })
     ]).then(function (res) {
       var v = res[0], m = res[1];
       document.getElementById('st-version').textContent = v.version || '—';
@@ -40,22 +41,34 @@
       document.getElementById('st-build').textContent = v.buildTime || '—';
       document.getElementById('st-platform').textContent = m.platform || '—';
       document.getElementById('st-host').textContent = m.hostname || '—';
+      var total = Number(m.disk_total_bytes)||0, free = Number(m.disk_free_bytes)||0;
+      var used = total - free;
+      var pct = m.disk_percent != null ? m.disk_percent.toFixed(1) : '—';
       document.getElementById('st-disk').textContent =
-        window.humanSize(m.disk_total_bytes - m.disk_free_bytes) + ' / ' + window.humanSize(m.disk_total_bytes) +
-        ' (' + m.disk_percent.toFixed(1) + '%)';
+        window.humanSize(used) + ' / ' + window.humanSize(total) + ' (' + pct + '%)';
     }).catch(function () {
       document.getElementById('st-version').textContent = '加载失败';
+      document.getElementById('st-disk').textContent = '加载失败';
     });
   }
 
   // 主题切换(与 main.js 的 window.setTheme/getTheme 联动)
   function initTheme() {
     var seg = document.getElementById('st-theme');
-    if (!seg || !window.setTheme) return;
+    if (!seg || !window.setTheme || !window.getTheme) return;
     var cur = window.getTheme();
     seg.querySelectorAll('[data-theme-opt]').forEach(function (b) {
-      b.classList.toggle('active', b.dataset.themeOpt === cur);
-      b.addEventListener('click', function () { window.setTheme(b.dataset.themeOpt); });
+      var on = b.dataset.themeOpt === cur;
+      b.classList.toggle('active', on);
+      b.setAttribute('aria-checked', String(on));
+      b.addEventListener('click', function () {
+        window.setTheme(b.dataset.themeOpt);
+        seg.querySelectorAll('[data-theme-opt]').forEach(function(x){
+          var is = x.dataset.themeOpt === b.dataset.themeOpt;
+          x.classList.toggle('active', is);
+          x.setAttribute('aria-checked', String(is));
+        });
+      });
     });
   }
 

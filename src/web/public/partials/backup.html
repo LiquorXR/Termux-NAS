@@ -1,27 +1,27 @@
 <div class="card">
   <h2>新建备份任务</h2>
-  <p>将源目录备份到目标目录(目标可填远程 rsync 地址,如 <code>user@host:/path</code>)。定时表达式为 5 字段 cron(分 时 日 月 周),留空表示仅手动执行。</p>
+  <p style="color:var(--muted);font-size:13px">将源目录备份到目标目录(目标可填远程 rsync 地址,如 <code>user@host:/path</code>)。定时表达式为 5 字段 cron(分 时 日 月 周),留空表示仅手动执行。</p>
   <div class="form-grid" style="margin-top:12px">
-    <div><label>任务名</label><input id="bk-name" placeholder="如:照片备份"></div>
-    <div><label>源目录</label><input id="bk-src" placeholder="/storage/shared/DCIM"></div>
-    <div><label>目标目录</label><input id="bk-dst" placeholder="/storage/shared/backup"></div>
-    <div><label>定时(cron)</label><input id="bk-sched" placeholder="0 3 * * *"></div>
+    <div><label for="bk-name">任务名</label><input id="bk-name" placeholder="如:照片备份" autocomplete="off"></div>
+    <div><label for="bk-src">源目录</label><input id="bk-src" placeholder="/storage/shared/DCIM" autocomplete="off"></div>
+    <div><label for="bk-dst">目标目录</label><input id="bk-dst" placeholder="/storage/shared/backup" autocomplete="off"></div>
+    <div><label for="bk-sched">定时(cron)</label><input id="bk-sched" placeholder="0 3 * * *" autocomplete="off"></div>
   </div>
   <div class="ftools" style="margin-top:12px">
-    <button type="button" class="btn primary sm" onclick="bkCreate()">创建任务</button>
+    <button type="button" class="btn primary sm" id="bk-create">创建任务</button>
   </div>
 </div>
 
 <div class="card">
   <div class="fbar">
     <h2>备份任务</h2>
-    <span class="fcount" id="bk-count"></span>
+    <span class="fcount" id="bk-count" aria-live="polite"></span>
   </div>
-  <table class="ftable">
+  <table class="ftable" aria-label="备份任务列表">
     <thead>
       <tr><th>任务</th><th>状态</th><th class="col-optional">上次运行</th><th class="col-optional">上次大小</th><th style="text-align:right">操作</th></tr>
     </thead>
-    <tbody id="bk-rows">
+    <tbody id="bk-rows" aria-live="polite">
       <tr><td colspan="5" class="fempty">加载中…</td></tr>
     </tbody>
   </table>
@@ -31,18 +31,21 @@
 (function () {
   var stateText = { ok: '成功', error: '失败', running: '执行中', '': '未运行' };
   var stateBadge = { ok: 'badge ok', error: 'badge err', running: 'badge warn', '': 'badge' };
+  function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
 
   function bkAct(id, action, btn) {
     window.setBtnLoading(btn, true);
     fetch('/api/backup/' + action, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
       body: JSON.stringify({ id: id })
     })
       .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
       .then(function (res) {
         if (!res.ok) toast(res.j.error || '操作失败', 'err');
         else if (action === 'restore') toast('恢复任务已启动', 'ok');
+        else toast('已执行', 'ok');
         load();
       })
       .catch(function () { toast('网络错误', 'err'); load(); })
@@ -52,15 +55,18 @@
   function bkDelete(id) {
     confirmDialog('删除任务', '确定删除备份任务?').then(function (ok) {
       if (!ok) return;
-      fetch('/api/backup/jobs/' + id, { method: 'DELETE' })
+      fetch('/api/backup/jobs/' + id, { method: 'DELETE', credentials: 'same-origin' })
+        .then(function (r){ if(!r.ok) throw new Error('删除失败'); return r.json(); })
         .then(function () { toast('已删除', 'ok'); load(); })
-        .catch(function () { toast('网络错误', 'err'); });
+        .catch(function (e) { toast(e.message || '网络错误', 'err'); });
     });
   }
 
   function render(list) {
     var tbody = document.getElementById('bk-rows');
-    document.getElementById('bk-count').textContent = '共 ' + list.length + ' 个';
+    var countEl = document.getElementById('bk-count');
+    if(!tbody) return;
+    if(countEl) countEl.textContent = '共 ' + list.length + ' 个';
     if (!list.length) {
       tbody.innerHTML = '<tr><td colspan="5" class="fempty">暂无备份任务,请在上方创建</td></tr>';
       return;
@@ -68,39 +74,59 @@
     tbody.innerHTML = list.map(function (j) {
       var running = j.last_status === 'running';
       var btns = '';
-      btns += '<button class="btn sm" onclick="bkAct(' + j.id + ',\'run\',this)" ' + (running ? 'disabled' : '') + '>立即备份</button>';
-      btns += '<button class="btn sm" onclick="bkAct(' + j.id + ',\'restore\',this)" ' + (running ? 'disabled' : '') + '>恢复</button>';
-      btns += '<button class="btn sm danger" onclick="bkDelete(' + j.id + ')">删除</button>';
+      btns += '<button type="button" class="btn sm" data-act="run" data-id="' + j.id + '" ' + (running ? 'disabled' : '') + ' aria-label="立即备份 ' + esc(j.name) + '">立即备份</button>';
+      // 恢复为破坏性操作，同样确认
+      btns += '<button type="button" class="btn sm" data-act="restore" data-id="' + j.id + '" ' + (running ? 'disabled' : '') + ' aria-label="恢复 ' + esc(j.name) + '">恢复</button>';
+      btns += '<button type="button" class="btn sm danger" data-act="delete" data-id="' + j.id + '" aria-label="删除 ' + esc(j.name) + '">删除</button>';
       var info = '<div style="font-size:11px;color:var(--muted)">' +
-        '<span title="源">' + j.source + '</span> → <span title="目标">' + j.target + '</span>' +
-        (j.schedule ? ' · <span title="定时">' + j.schedule + '</span>' : ' · 手动') +
+        '<span title="源">' + esc(j.source) + '</span> → <span title="目标">' + esc(j.target) + '</span>' +
+        (j.schedule ? ' · <span title="定时">' + esc(j.schedule) + '</span>' : ' · 手动') +
         (j.enabled ? '' : ' · 已停用') + '</div>';
       return '<tr>' +
-        '<td>' + j.name + info + '</td>' +
-        '<td><span class="' + (stateBadge[j.last_status] || 'badge') + '">' + (stateText[j.last_status] || j.last_status) + '</span></td>' +
-        '<td class="col-optional">' + window.fmtTime(j.last_run) + '</td>' +
-        '<td class="col-optional">' + window.humanSize(j.last_size) + '</td>' +
-        '<td style="text-align:right;white-space:nowrap">' + btns + '</td>' +
+        '<td>' + esc(j.name) + info + '</td>' +
+        '<td><span class="' + (stateBadge[j.last_status] || 'badge') + '">' + esc(stateText[j.last_status] || j.last_status || '未运行') + '</span></td>' +
+        '<td class="col-optional num">' + esc(window.fmtTime(j.last_run)) + '</td>' +
+        '<td class="col-optional num">' + esc(window.humanSize(j.last_size)) + '</td>' +
+        '<td style="text-align:right;white-space:nowrap"><div style="display:flex;gap:6px;justify-content:flex-end;flex-wrap:wrap">' + btns + '</div></td>' +
         '</tr>';
     }).join('');
   }
 
+  var timer = null;
+  var abortCtrl = null;
+  var obs = null;
+  function isActive(){ return !!document.getElementById('bk-rows'); }
   function load() {
-    fetch('/api/backup/jobs')
+    if(!isActive()){ stop(); return; }
+    if(document.hidden) return;
+    if(abortCtrl) try{abortCtrl.abort();}catch(e){}
+    abortCtrl = new AbortController();
+    fetch('/api/backup/jobs', { credentials:'same-origin', signal: abortCtrl.signal })
       .then(function (r) { return r.json(); })
-      .then(function (j) { render(j.jobs || []); })
-      .catch(function () {});
+      .then(function (j) { if(isActive()) render(j.jobs || []); })
+      .catch(function (e){ if(e.name!=='AbortError'){/*静默*/} });
   }
+  function stop(){ if(timer){clearInterval(timer);timer=null} if(abortCtrl) try{abortCtrl.abort();}catch(e){} if(obs){obs.disconnect();obs=null;} document.removeEventListener('visibilitychange', onVis); }
+  function onVis(){ if(!document.hidden) load(); }
 
   function bkCreate() {
-    var name = document.getElementById('bk-name').value.trim();
-    var src = document.getElementById('bk-src').value.trim();
-    var dst = document.getElementById('bk-dst').value.trim();
-    var sched = document.getElementById('bk-sched').value.trim();
-    if (!name || !src || !dst) { toast('任务名/源/目标必填', 'err'); return; }
+    var nameEl = document.getElementById('bk-name');
+    var srcEl = document.getElementById('bk-src');
+    var dstEl = document.getElementById('bk-dst');
+    var schedEl = document.getElementById('bk-sched');
+    var name = nameEl.value.trim();
+    var src = srcEl.value.trim();
+    var dst = dstEl.value.trim();
+    var sched = schedEl.value.trim();
+    // 清错误态
+    [nameEl, srcEl, dstEl].forEach(function(el){ el.removeAttribute('aria-invalid'); });
+    if (!name) { nameEl.setAttribute('aria-invalid','true'); nameEl.focus(); toast('任务名必填', 'err'); return; }
+    if (!src) { srcEl.setAttribute('aria-invalid','true'); srcEl.focus(); toast('源目录必填', 'err'); return; }
+    if (!dst) { dstEl.setAttribute('aria-invalid','true'); dstEl.focus(); toast('目标目录必填', 'err'); return; }
     fetch('/api/backup/jobs', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
       body: JSON.stringify({ name: name, source: src, target: dst, schedule: sched })
     })
       .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
@@ -119,7 +145,31 @@
   window.bkAct = bkAct;
   window.bkDelete = bkDelete;
   window.bkCreate = bkCreate;
+
+  var rows = document.getElementById('bk-rows');
+  if(rows){
+    rows.addEventListener('click', function(e){
+      var btn = e.target.closest('[data-act]');
+      if(!btn) return;
+      var id = Number(btn.dataset.id);
+      var act = btn.dataset.act;
+      if(act==='delete') bkDelete(id);
+      else if(act==='restore'){
+        confirmDialog('恢复备份', '恢复会将目标目录内容覆盖至源目录，确定继续？').then(function(ok){
+          if(ok) bkAct(id, 'restore', btn);
+        });
+      } else bkAct(id, act, btn);
+    });
+  }
+  var createBtn = document.getElementById('bk-create');
+  if(createBtn) createBtn.addEventListener('click', bkCreate);
+
   load();
-  setInterval(load, 5000);
+  timer = setInterval(load, 5000);
+  document.addEventListener('visibilitychange', onVis);
+  obs = new MutationObserver(function(){ if(!isActive()) stop(); });
+  var content = document.getElementById('content');
+  if(content) obs.observe(content, {childList:true});
+  window.__bkTimer = timer;
 })();
 </script>

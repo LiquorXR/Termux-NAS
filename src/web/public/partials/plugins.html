@@ -2,11 +2,12 @@
   <h2>安装插件</h2>
   <p>上传 <code>.tar.gz</code> 插件包,或填写插件源 URL(由 nasd 下载安装)。</p>
   <div class="ftools" style="margin-top:12px">
-    <label class="btn sm" id="plg-file-label">选择插件包
+    <label class="btn sm" id="plg-file-label" tabindex="0" role="button" aria-label="选择插件包文件">选择插件包
       <input type="file" id="plg-file" accept=".tar.gz,.tgz" hidden>
     </label>
     <div style="flex:1;min-width:240px">
-      <input type="text" id="plg-url" placeholder="https://example.com/plugin.tar.gz">
+      <label for="plg-url" class="sr-only">插件源 URL</label>
+      <input type="url" id="plg-url" placeholder="https://example.com/plugin.tar.gz" aria-label="插件源 URL">
     </div>
     <button type="button" class="btn primary sm" id="plg-install-url">URL 安装</button>
   </div>
@@ -15,13 +16,13 @@
 <div class="card">
   <div class="fbar">
     <h2>插件列表</h2>
-    <span class="fcount" id="plg-count"></span>
+    <span class="fcount" id="plg-count" aria-live="polite"></span>
   </div>
-  <table class="ftable">
+  <table class="ftable" aria-label="插件列表">
     <thead>
       <tr><th>插件</th><th>状态</th><th class="col-optional">PID</th><th class="col-optional">重启</th><th style="text-align:right">操作</th></tr>
     </thead>
-    <tbody id="plg-rows">
+    <tbody id="plg-rows" aria-live="polite">
       <tr><td colspan="5" class="fempty">加载中…</td></tr>
     </tbody>
   </table>
@@ -38,8 +39,10 @@
     'stopping': '停止中', 'crashed': '已崩溃', 'crash-loop': '崩溃循环'
   };
 
+  function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
+
   function openLink(id, path) {
-    window.open('/p/' + id + (path || ''), '_blank');
+    window.open('/p/' + encodeURIComponent(id) + (path || ''), '_blank');
   }
 
   function act(id, action, btn) {
@@ -54,11 +57,12 @@
 
   function doAct(id, action, btn) {
     window.setBtnLoading(btn, true);
-    fetch('/api/plugins/' + id + '/' + action, { method: action === 'uninstall' ? 'DELETE' : 'POST' })
+    fetch('/api/plugins/' + encodeURIComponent(id) + '/' + action, { method: action === 'uninstall' ? 'DELETE' : 'POST', credentials: 'same-origin' })
       .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
       .then(function (res) {
         if (!res.ok) toast(res.j.error || '操作失败', 'err');
         else if (action === 'uninstall') toast('已卸载 ' + id, 'ok');
+        else toast('操作已发送', 'ok');
         load();
       })
       .catch(function () { toast('网络错误', 'err'); load(); })
@@ -67,7 +71,9 @@
 
   function render(list) {
     var tbody = document.getElementById('plg-rows');
-    document.getElementById('plg-count').textContent = '共 ' + list.length + ' 个';
+    var countEl = document.getElementById('plg-count');
+    if (!tbody) return;
+    if (countEl) countEl.textContent = '共 ' + list.length + ' 个';
     if (!list.length) {
       tbody.innerHTML = '<tr><td colspan="5" class="fempty">暂无插件,请在上方安装</td></tr>';
       return;
@@ -78,38 +84,50 @@
       var busy = st === 'starting' || st === 'stopping';
       var btns = '';
       if (running) {
-        btns += '<button class="btn sm" onclick="plgOpen(\'' + p.id + '\')">打开</button>';
-        btns += '<button class="btn sm" onclick="plgAct(\'' + p.id + '\',\'stop\',this)">停止</button>';
-        btns += '<button class="btn sm" onclick="plgAct(\'' + p.id + '\',\'restart\',this)">重启</button>';
+        btns += '<button type="button" class="btn sm" data-open="' + esc(p.id) + '" aria-label="打开 ' + esc(p.id) + '">打开</button>';
+        btns += '<button type="button" class="btn sm" data-act="stop" data-id="' + esc(p.id) + '" aria-label="停止 ' + esc(p.id) + '">停止</button>';
+        btns += '<button type="button" class="btn sm" data-act="restart" data-id="' + esc(p.id) + '" aria-label="重启 ' + esc(p.id) + '">重启</button>';
       } else if (busy) {
-        btns += '<span class="badge warn">处理中…</span>';
+        btns += '<span class="badge warn" aria-live="polite">处理中…</span>';
       } else {
         if (st === 'crash-loop') {
-          btns += '<button class="btn sm" onclick="plgAct(\'' + p.id + '\',\'stop\',this)">复位</button>';
+          btns += '<button type="button" class="btn sm" data-act="stop" data-id="' + esc(p.id) + '" aria-label="复位 ' + esc(p.id) + '">复位</button>';
         } else {
-          btns += '<button class="btn sm" onclick="plgAct(\'' + p.id + '\',\'start\',this)">启动</button>';
+          btns += '<button type="button" class="btn sm" data-act="start" data-id="' + esc(p.id) + '" aria-label="启动 ' + esc(p.id) + '">启动</button>';
         }
-        btns += '<button class="btn sm danger" onclick="plgAct(\'' + p.id + '\',\'uninstall\',this)">卸载</button>';
+        btns += '<button type="button" class="btn sm danger" data-act="uninstall" data-id="' + esc(p.id) + '" aria-label="卸载 ' + esc(p.id) + '">卸载</button>';
       }
-      var name = (p.reg && p.reg.name) ? p.reg.name : p.id;
-      var version = (p.reg && p.reg.version) ? ' · v' + p.reg.version : '';
+      var name = esc((p.reg && p.reg.name) ? p.reg.name : p.id);
+      var version = (p.reg && p.reg.version) ? ' · v' + esc(p.reg.version) : '';
+      var size = p.size ? window.humanSize(p.size) : '—';
+      var desc = (p.reg && p.reg.description) ? '<div style="font-size:11px;color:var(--muted)">' + esc(p.reg.description) + '</div>' : '';
       return '<tr>' +
-        '<td><a class="link" onclick="plgOpen(\'' + p.id + '\')"><span class="fico"><svg class="fic" aria-hidden="true"><use href="#i-plugins"/></svg></span>' + name + '</a>' +
-        '<div style="font-size:11px;color:var(--muted)">' + p.id + version + ' · ' + window.humanSize(p.size) + '</div></td>' +
-        '<td><span class="' + (stateBadge[st] || 'badge') + '">' + (stateText[st] || st) + '</span></td>' +
-        '<td class="col-optional">' + (p.pid || '—') + '</td>' +
-        '<td class="col-optional">' + (p.restarts || 0) + '</td>' +
-        '<td style="text-align:right;white-space:nowrap">' + btns + '</td>' +
+        '<td><button type="button" class="link" data-open="' + esc(p.id) + '" aria-label="打开 ' + esc(p.id) + '"><span class="fico"><svg class="fic" aria-hidden="true"><use href="#i-plugins"/></svg></span>' + name + '</button>' +
+        '<div style="font-size:11px;color:var(--muted)">' + esc(p.id) + version + ' · ' + size + '</div>' + desc + '</td>' +
+        '<td><span class="' + (stateBadge[st] || 'badge') + '">' + esc(stateText[st] || st) + '</span></td>' +
+        '<td class="col-optional num">' + esc(p.pid || '—') + '</td>' +
+        '<td class="col-optional num">' + esc(p.restarts || 0) + '</td>' +
+        '<td style="text-align:right;white-space:nowrap"><div style="display:flex;gap:6px;justify-content:flex-end;flex-wrap:wrap">' + btns + '</div></td>' +
         '</tr>';
     }).join('');
   }
 
+  var timer = null;
+  var abortCtrl = null;
+  var obs = null;
+  function isActive() { return !!document.getElementById('plg-rows'); }
   function load() {
-    fetch('/api/plugins')
+    if (!isActive()) { stop(); return; }
+    if (document.hidden) return;
+    if (abortCtrl) try{ abortCtrl.abort(); }catch(e){}
+    abortCtrl = new AbortController();
+    fetch('/api/plugins', { credentials: 'same-origin', signal: abortCtrl.signal })
       .then(function (r) { return r.json(); })
-      .then(function (j) { render(j.plugins || []); })
-      .catch(function () { /* 静默,下轮重试 */ });
+      .then(function (j) { if (isActive()) render(j.plugins || []); })
+      .catch(function (e) { if (e.name !== 'AbortError') {/* 静默，保留旧数据 */} });
   }
+  function stop(){ if(timer){clearInterval(timer); timer=null;} if(abortCtrl) try{abortCtrl.abort();}catch(e){} if(obs){obs.disconnect(); obs=null;} document.removeEventListener('visibilitychange', onVis); }
+  function onVis(){ if(!document.hidden) load(); }
 
   function installURL() {
     var url = document.getElementById('plg-url').value.trim();
@@ -120,6 +138,7 @@
     fetch('/api/plugins/install', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
       body: JSON.stringify({ name: name, source: url })
     })
       .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
@@ -138,7 +157,7 @@
     var fd = new FormData();
     fd.append('file', f);
     toast('上传安装中…');
-    fetch('/api/plugins/install', { method: 'POST', body: fd })
+    fetch('/api/plugins/install', { method: 'POST', credentials: 'same-origin', body: fd })
       .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
       .then(function (res) {
         if (res.ok) {
@@ -152,10 +171,32 @@
 
   window.plgAct = act;
   window.plgOpen = openLink;
+  // 委托式事件，避免 onclick 字符串注入
+  var rows = document.getElementById('plg-rows');
+  if (rows) {
+    rows.addEventListener('click', function(e){
+      var open = e.target.closest('[data-open]');
+      if (open) { openLink(open.dataset.open); return; }
+      var btn = e.target.closest('[data-act]');
+      if (btn) { act(btn.dataset.id, btn.dataset.act, btn); }
+    });
+  }
+  var fileLabel = document.getElementById('plg-file-label');
+  if (fileLabel) {
+    fileLabel.addEventListener('keydown', function(e){
+      if(e.key==='Enter'||e.key===' '){ e.preventDefault(); document.getElementById('plg-file').click(); }
+    });
+  }
   document.getElementById('plg-file').addEventListener('change', function (e) { installUpload(e.target.files[0]); });
   document.getElementById('plg-install-url').addEventListener('click', installURL);
 
   load();
-  setInterval(load, 3000);
+  timer = setInterval(load, 3000);
+  document.addEventListener('visibilitychange', onVis);
+  // 清理：当 content 被替换时自动停
+  obs = new MutationObserver(function(){ if(!isActive()) stop(); });
+  var content = document.getElementById('content');
+  if(content) obs.observe(content, {childList:true});
+  window.__plgTimer = timer;
 })();
 </script>
